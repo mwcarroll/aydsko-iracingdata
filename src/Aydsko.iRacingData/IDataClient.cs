@@ -19,6 +19,9 @@ namespace Aydsko.iRacingData;
 
 public interface IDataClient
 {
+    /// <summary>Is the <see cref="IDataClient"/> logged in?</summary>
+    bool IsLoggedIn { get; }
+
     /// <summary>Supply the username and password if they weren't supplied through the <see cref="iRacingDataClientOptions"/> object.</summary>
     /// <param name="username">iRacing user name to use for authentication.</param>
     /// <param name="password">Password associated with the iRacing user name used to authenticate.</param>
@@ -31,6 +34,15 @@ public interface IDataClient
     /// <param name="passwordIsEncoded">If <see langword="true" /> indicates the <paramref name="password"/> value is already encoded ready for submission to the iRacing API.</param>
     /// <exception cref="iRacingClientOptionsValueMissingException">Either <paramref name="username"/> or <paramref name="password"/> were <see langword="null"/> or white space.</exception>
     void UseUsernameAndPassword(string username, string password, bool passwordIsEncoded);
+
+    /// <summary>External call to login method, using the <see cref="iRacingDataClientOptions"/> object.</summary>
+    /// <param name="cancellationToken">A token to allow the operation to be cancelled.</param>
+    /// <returns></returns>
+    /// <exception cref="iRacingClientOptionsValueMissingException">Either username or password in the <see cref="iRacingDataClientOptions"/> were <see langword="null"/> or white space.</exception>
+    /// <exception cref="iRacingInMaintenancePeriodException">iRacing is in maintenance period.</exception>
+    /// <exception cref="iRacingLoginFailedException">LIf there's a login failure with the username and password in <see cref="iRacingDataClientOptions"/>.</exception>
+    /// /// <exception cref="iRacingDataClientException">If there's a problem processing the result.</exception>
+    Task LoginExternalAsync(CancellationToken cancellationToken = default);
 
     /// <summary>Retrieves details about the car assets, including image paths and descriptions.</summary>
     /// <param name="cancellationToken">A token to allow the operation to be cancelled.</param>

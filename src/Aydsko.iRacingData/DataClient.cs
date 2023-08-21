@@ -60,6 +60,11 @@ internal class DataClient(HttpClient httpClient,
         UseUsernameAndPassword(username, password, false);
     }
 
+    public async Task LoginExternalAsync(CancellationToken cancellationToken = default)
+    {
+        await LoginInternalAsync(cancellationToken).ConfigureAwait(false);
+    }
+
     /// <inheritdoc />
     public async Task<DataResponse<IReadOnlyDictionary<string, CarAssetDetail>>> GetCarAssetDetailsAsync(CancellationToken cancellationToken = default)
     {
