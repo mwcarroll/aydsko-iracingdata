@@ -17,6 +17,7 @@ using Aydsko.iRacingData.Tracks;
 
 namespace Aydsko.iRacingData;
 
+/// <summary>Main client to access the iRacing "/data" API endpoints.</summary>
 public interface IDataClient
 {
     /// <summary>Is the <see cref="IDataClient"/> logged in?</summary>
@@ -584,6 +585,10 @@ public interface IDataClient
     /// <exception cref="InvalidOperationException">If the client is not currently authenticated.</exception>
     /// <exception cref="iRacingDataClientException">If there's a problem processing the result.</exception>
     /// <exception cref="iRacingUnauthorizedResponseException">If the iRacing API returns a <c>401 Unauthorized</c> response.</exception>
+    Task<DataResponse<MemberChart>> GetMemberChartDataAsync(int? customerId, int categoryId, MemberChartType chartType, CancellationToken cancellationToken = default);
+
+    [Obsolete("Use \"GetMemberChartDataAsync\" instead.")]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Style", "VSTHRD200:Use \"Async\" suffix for async methods", Justification = "Remains for compatibility while marked obsolete.")]
     Task<DataResponse<MemberChart>> GetMemberChartData(int? customerId, int categoryId, MemberChartType chartType, CancellationToken cancellationToken = default);
 
     /// <summary>Searches the league directory based on the given parameters.</summary>

@@ -24,7 +24,7 @@ jobs:
 
     steps:
       - name: Download Artifacts
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
 
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@v3
@@ -38,8 +38,10 @@ jobs:
             PACKAGE_KEY: ${{ secrets.PACKAGE_UPLOAD }}
 
       - name: Delete Old Packages
-        uses: smartsquaregmbh/delete-old-packages@v0.6.0
+        uses: smartsquaregmbh/delete-old-packages@v0.7.0
         with:
+          user: AdrianJSClark
+          type: nuget
           keep: 5
           dry-run: true
           names: |

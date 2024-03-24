@@ -1,21 +1,3 @@
 ﻿Fixes / Changes:
 
- - BREAKING CHANGE: Enumeration added for League Session "Status" field. (Issue: 182)
-   - Previous "int" value available as "StatusRaw" property.
-
-
-
-New Versioning Scheme:
-
-From now on the version numbers will be in the format:
-
-    [YY][SS].[R]
-
-Where:
- - YY = two digit year
- - SS = the iRacing season this corresponds to as a zero-padded number (i.e. 01, 02, 03, 04)
- - R  = release number, which increments when changes are made although it may not be sequential
-
-Example:
-
- - 2303.1 = changes compatible with iRacing 2023 Season 3, release 1
+ - New property on "Tracks.Track" called "PitRoadSpeedLimitKph" which returns the pit road speed limit in kilometers per hour.

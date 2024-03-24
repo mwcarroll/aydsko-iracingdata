@@ -6,21 +6,22 @@ namespace Aydsko.iRacingData.UnitTests;
 internal sealed class TrackScreenshotServiceTests : MockedHttpTestBase
 {
     // NUnit will ensure that "SetUp" runs before each test so these can all be forced to "null".
+    private DataClient dataClient = null!;
     private TrackScreenshotService sut = null!;
 
     [SetUp]
-    public async Task SetUp()
+    public async Task SetUpAsync()
     {
         BaseSetUp();
-        var dataClient = new DataClient(HttpClient,
-                                        new TestLogger<DataClient>(),
-                                        new iRacingDataClientOptions()
-                                        {
-                                            Username = "test.user@example.com",
-                                            Password = "SuperSecretPassword",
-                                            CurrentDateTimeSource = () => new DateTimeOffset(2022, 04, 05, 0, 0, 0, TimeSpan.Zero)
-                                        },
-                                        new System.Net.CookieContainer());
+        dataClient = new DataClient(HttpClient,
+                                    new TestLogger<DataClient>(),
+                                    new iRacingDataClientOptions()
+                                    {
+                                        Username = "test.user@example.com",
+                                        Password = "SuperSecretPassword",
+                                        CurrentDateTimeSource = () => new DateTimeOffset(2022, 04, 05, 0, 0, 0, TimeSpan.Zero)
+                                    },
+                                    new System.Net.CookieContainer());
 
         // Make use of our captured responses.
         await MessageHandler.QueueResponsesAsync(nameof(CapturedResponseValidationTests.GetTracksSuccessfulAsync)).ConfigureAwait(false);
@@ -30,7 +31,7 @@ internal sealed class TrackScreenshotServiceTests : MockedHttpTestBase
     }
 
     [Test]
-    public async Task GivenHungaroringTrackId_ThenGetScreenshotsByTrackIdReturnsCorrectResults()
+    public async Task GivenHungaroringTrackId_ThenGetScreenshotsByTrackIdReturnsCorrectResultsAsync()
     {
         const int hungaroringTrackId = 413;
         var hungaroringResults = await sut.GetScreenshotLinksAsync(hungaroringTrackId).ConfigureAwait(false);
@@ -53,7 +54,7 @@ internal sealed class TrackScreenshotServiceTests : MockedHttpTestBase
     }
 
     [Test]
-    public async Task GivenSuzukaTrackId_ThenGetScreenshotsByTrackIdReturnsCorrectResults()
+    public async Task GivenSuzukaTrackId_ThenGetScreenshotsByTrackIdReturnsCorrectResultsAsync()
     {
         const int suzukaTrackId = 168;
         var suzukaResults = await sut.GetScreenshotLinksAsync(suzukaTrackId).ConfigureAwait(false);
@@ -66,6 +67,15 @@ internal sealed class TrackScreenshotServiceTests : MockedHttpTestBase
             Assert.That(suzukaResults, Contains.Item(new Uri("https://dqfp1ltauszrc.cloudfront.net/public/track-maps-screenshots/114_screenshots/03.jpg")));
             Assert.That(suzukaResults, Contains.Item(new Uri("https://dqfp1ltauszrc.cloudfront.net/public/track-maps-screenshots/114_screenshots/04.jpg")));
         });
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            dataClient?.Dispose();
+        }
+        base.Dispose(disposing);
     }
 }
 #pragma warning restore CS0618 // Type or member is obsolete

@@ -1,6 +1,7 @@
 ﻿// © 2023 Adrian Clark
 // This file is licensed to you under the MIT license.
 
+using System.Net;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -15,7 +16,7 @@ public class PasswordEncodingTests : MockedHttpTestBase
     }
 
     [TestCaseSource(nameof(GetTestCases))]
-    public async Task ValidateLoginRequestViaOptions(string username, string password, bool passwordIsEncoded, string expectedEncodedPassword)
+    public async Task ValidateLoginRequestViaOptionsAsync(string username, string password, bool passwordIsEncoded, string expectedEncodedPassword)
     {
         var options = new iRacingDataClientOptions
         {
@@ -26,10 +27,10 @@ public class PasswordEncodingTests : MockedHttpTestBase
             SaveCookies = null,
         };
 
-        var sut = new DataClient(HttpClient,
-                                 new TestLogger<DataClient>(),
-                                 options,
-                                 CookieContainer);
+        using var sut = new DataClient(HttpClient,
+                                       new TestLogger<DataClient>(),
+                                       options,
+                                       CookieContainer);
 
         await MessageHandler.QueueResponsesAsync(nameof(CapturedResponseValidationTests.GetLookupsSuccessfulAsync)).ConfigureAwait(false);
         var lookups = await sut.GetLookupsAsync(CancellationToken.None).ConfigureAwait(false);
@@ -53,7 +54,7 @@ public class PasswordEncodingTests : MockedHttpTestBase
     }
 
     [TestCaseSource(nameof(GetTestCases))]
-    public async Task ValidateLoginRequestViaMethodWithPasswordIsEncodedParam(string username, string password, bool passwordIsEncoded, string expectedEncodedPassword)
+    public async Task ValidateLoginRequestViaMethodWithPasswordIsEncodedParamAsync(string username, string password, bool passwordIsEncoded, string expectedEncodedPassword)
     {
         var options = new iRacingDataClientOptions
         {
@@ -63,10 +64,10 @@ public class PasswordEncodingTests : MockedHttpTestBase
 
         await MessageHandler.QueueResponsesAsync(nameof(CapturedResponseValidationTests.GetLookupsSuccessfulAsync)).ConfigureAwait(false);
 
-        var sut = new DataClient(HttpClient,
-                                 new TestLogger<DataClient>(),
-                                 options,
-                                 CookieContainer);
+        using var sut = new DataClient(HttpClient,
+                                       new TestLogger<DataClient>(),
+                                       options,
+                                       CookieContainer);
 
         sut.UseUsernameAndPassword(username, password, passwordIsEncoded);
 
@@ -89,7 +90,7 @@ public class PasswordEncodingTests : MockedHttpTestBase
     }
 
     [TestCaseSource(nameof(GetTestCasesWithUnencodedPasswords))]
-    public async Task ValidateLoginRequestViaMethod(string username, string password, string expectedEncodedPassword)
+    public async Task ValidateLoginRequestViaMethodAsync(string username, string password, string expectedEncodedPassword)
     {
         var options = new iRacingDataClientOptions
         {
@@ -99,10 +100,10 @@ public class PasswordEncodingTests : MockedHttpTestBase
 
         await MessageHandler.QueueResponsesAsync(nameof(CapturedResponseValidationTests.GetLookupsSuccessfulAsync)).ConfigureAwait(false);
 
-        var sut = new DataClient(HttpClient,
-                                 new TestLogger<DataClient>(),
-                                 options,
-                                 CookieContainer);
+        using var sut = new DataClient(HttpClient,
+                                       new TestLogger<DataClient>(),
+                                       options,
+                                       CookieContainer);
 
         sut.UseUsernameAndPassword(username, password);
 
@@ -122,6 +123,50 @@ public class PasswordEncodingTests : MockedHttpTestBase
         Assert.That(lookups, Is.Not.Null);
         Assert.That(lookups.Data, Is.Not.Null.Or.Empty);
     }
+
+    [TestCaseSource(nameof(GetTestCasesWithUnencodedPasswords))]
+    public async Task LoginIsNotCalledIfCookiesAreSuccessfullyRestoredAsync(string username, string password, string expectedEncodedPassword)
+    {
+        var restoreCookiesWasCalled = false;
+        var saveCookiesWasCalled = false;
+
+        var cookieContainer = new CookieContainer();
+        cookieContainer.Add(new Cookie("authtoken_members", "%7B%22authtoken%22%3A%7B%22authcode%22%3A%22AbC123%22%2C%22email%22%3A%22test.user%40example.com%22%7D%7D", "/", ".iracing.com"));
+        cookieContainer.Add(new Cookie("irsso_members", "ABC123DEF456", "/", ".iracing.com"));
+        cookieContainer.Add(new Cookie("r_members", "", "/", ".iracing.com"));
+
+        var cookieCollection = cookieContainer.GetCookies(new Uri("https://members-ng.iracing.com"));
+
+        var options = new iRacingDataClientOptions
+        {
+            RestoreCookies = () =>
+            {
+                restoreCookiesWasCalled = true;
+                return cookieCollection;
+            },
+            SaveCookies = (newCollection) =>
+            {
+                cookieCollection = newCollection;
+                saveCookiesWasCalled = true;
+            },
+        };
+
+        await MessageHandler.QueueResponsesAsync(nameof(CapturedResponseValidationTests.GetLookupsSuccessfulAsync), false).ConfigureAwait(false);
+
+        using var sut = new DataClient(HttpClient,
+                                       new TestLogger<DataClient>(),
+                                       options,
+                                       CookieContainer);
+
+        sut.UseUsernameAndPassword(username, password);
+
+        var lookups = await sut.GetLookupsAsync(CancellationToken.None).ConfigureAwait(false);
+
+        Assert.That(restoreCookiesWasCalled, Is.True);
+        Assert.That(saveCookiesWasCalled, Is.False);
+        Assert.That(MessageHandler.RequestContent.Count, Is.EqualTo(2));
+    }
+
 
 #pragma warning disable CA1024 // Use properties where appropriate - NUnit's API requires these to be methods.
     public static IEnumerable<TestCaseData> GetTestCases()

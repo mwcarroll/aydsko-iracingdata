@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFrameworks>netstandard2.0;net6.0</TargetFrameworks>
+    <TargetFrameworks>netstandard2.0;net6.0;net8.0</TargetFrameworks>
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
 
     <!-- Package Validation (https://docs.microsoft.com/en-us/dotnet/fundamentals/package-validation/overview) -->
@@ -76,6 +76,10 @@
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
+    <PackageReference Include="Microsoft.VisualStudio.Threading.Analyzers" Version="17.8.14">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
     <PackageReference Include="MinVer" Version="4.3.0">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
@@ -94,7 +98,7 @@
       <IsPreReleaseBuild>true</IsPreReleaseBuild>
       <IsPreReleaseBuild Condition="'$(MinVerPreRelease)' == ''">false</IsPreReleaseBuild>
     </PropertyGroup>
-    <Exec Command="echo ::set-output name=BUILDVERSION::$(MinVerVersion)" IgnoreExitCode="true" />
-    <Exec Command="echo ::set-output name=PRERELEASE::$(IsPreReleaseBuild)" IgnoreExitCode="true" />
+    <Exec Command="echo &quot;BUILDVERSION=$(MinVerVersion)&quot; >> &quot;$GITHUB_OUTPUT&quot;" IgnoreExitCode="true" />
+    <Exec Command="echo &quot;PRERELEASE=$(IsPreReleaseBuild)&quot; >> &quot;$GITHUB_OUTPUT&quot;" IgnoreExitCode="true" />
   </Target>
 </Project>
