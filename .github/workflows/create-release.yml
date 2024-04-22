@@ -11,15 +11,10 @@ jobs:
     name: Build & Test
     uses: ./.github/workflows/_build.yml
 
-  build-docs:
-    name: Build Documentation
-    uses: ./.github/workflows/_build-docs.yml
-
   deploy:
     name: Create Draft Release with NuGet Packages & Documentation Site
     needs:
       - build
-      - build-docs
     runs-on: ubuntu-latest
 
     env:
@@ -34,7 +29,7 @@ jobs:
         uses: actions/download-artifact@v4
 
       - name: Setup .NET SDK
-        uses: actions/setup-dotnet@v3
+        uses: actions/setup-dotnet@v4
 
       - run: Compress-Archive -Path "Documentation Site/*" -DestinationPath DocumentationSite.zip
         shell: pwsh
