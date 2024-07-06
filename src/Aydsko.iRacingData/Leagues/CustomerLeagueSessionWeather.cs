@@ -14,13 +14,13 @@ public class CustomerLeagueSessionWeather
     public int Type { get; set; }
 
     [JsonPropertyName("temp_units")]
-    public int TempUnits { get; set; }
+    public int TemperatureUnits { get; set; }
 
     [JsonPropertyName("temp_value")]
-    public int TempValue { get; set; }
+    public int TemperatureValue { get; set; }
 
     [JsonPropertyName("rel_humidity")]
-    public int RelHumidity { get; set; }
+    public int RelativeHumidity { get; set; }
 
     [JsonPropertyName("fog")]
     public int Fog { get; set; }
@@ -31,6 +31,11 @@ public class CustomerLeagueSessionWeather
     [JsonIgnore]
     public WindDirection WindDirection => (WindDirection)WindDir;
 
+    /// <summary>Wind units.</summary>
+    /// <remarks>
+    /// Maps to one of the <c>weather_wind_speed_units</c> lookup values retrieved
+    /// from the <see cref="IDataClient.GetLookupsAsync(CancellationToken)"/> call.
+    /// </remarks>
     [JsonPropertyName("wind_units")]
     public int WindUnits { get; set; }
 
@@ -41,10 +46,10 @@ public class CustomerLeagueSessionWeather
     public int Skies { get; set; }
 
     [JsonPropertyName("weather_var_initial")]
-    public int WeatherVarInitial { get; set; }
+    public int WeatherVariationInitial { get; set; }
 
     [JsonPropertyName("weather_var_ongoing")]
-    public int WeatherVarOngoing { get; set; }
+    public int WeatherVariationOngoing { get; set; }
 
     [JsonPropertyName("time_of_day")]
     public int TimeOfDay { get; set; }

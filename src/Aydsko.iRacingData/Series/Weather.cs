@@ -14,13 +14,16 @@ public class Weather
     public int Type { get; set; }
 
     [JsonPropertyName("temp_units")]
-    public int TempUnits { get; set; }
+    public int TemperatureUnits { get; set; }
 
     [JsonPropertyName("temp_value")]
-    public int TempValue { get; set; }
+    public int TemperatureValue { get; set; }
 
     [JsonPropertyName("rel_humidity")]
-    public int RelHumidity { get; set; }
+    public int RelativeHumidity { get; set; }
+
+    [JsonPropertyName("allow_fog")]
+    public bool AllowFog { get; set; }
 
     [JsonPropertyName("fog")]
     public int Fog { get; set; }
@@ -31,6 +34,11 @@ public class Weather
     [JsonIgnore]
     public WindDirection WindDirection => (WindDirection)WindDir;
 
+    /// <summary>Wind units.</summary>
+    /// <remarks>
+    /// Maps to one of the <c>weather_wind_speed_units</c> lookup values retrieved
+    /// from the <see cref="IDataClient.GetLookupsAsync(CancellationToken)"/> call.
+    /// </remarks>
     [JsonPropertyName("wind_units")]
     public int WindUnits { get; set; }
 
@@ -41,10 +49,10 @@ public class Weather
     public int Skies { get; set; }
 
     [JsonPropertyName("weather_var_initial")]
-    public int WeatherVarInitial { get; set; }
+    public int WeatherVariationInitial { get; set; }
 
     [JsonPropertyName("weather_var_ongoing")]
-    public int WeatherVarOngoing { get; set; }
+    public int WeatherVariationOngoing { get; set; }
 
     [JsonPropertyName("time_of_day")]
     public int TimeOfDay { get; set; }
@@ -55,9 +63,15 @@ public class Weather
     [JsonPropertyName("simulated_time_offsets")]
     public int[] SimulatedTimeOffsets { get; set; } = Array.Empty<int>();
 
-    [JsonPropertyName("simulated_time_multiplier")]
-    public int SimulatedTimeMultiplier { get; set; }
+    [JsonPropertyName("precip_option")]
+    public int PrecipitationOption { get; set; }
 
-    [JsonPropertyName("simulated_start_utc_time")]
-    public DateTimeOffset SimulatedStartUtcTime { get; set; }
+    [JsonPropertyName("weather_url")]
+    public string? WeatherUrl { get; set; }
+
+    [JsonPropertyName("weather_summary")]
+    public WeatherSummary? WeatherSummary { get; set; }
+
+    [JsonPropertyName("forecast_options")]
+    public ForecastOptions? ForecastOptions { get; set; }
 }

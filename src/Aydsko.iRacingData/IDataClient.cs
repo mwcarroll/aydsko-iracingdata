@@ -1,4 +1,4 @@
-﻿// © 2023 Adrian Clark
+﻿// © 2023-2024 Adrian Clark
 // This file is licensed to you under the MIT license.
 
 using Aydsko.iRacingData.Cars;
@@ -689,6 +689,16 @@ public interface IDataClient
     /// <exception cref="iRacingUnauthorizedResponseException">If the iRacing API returns a <c>401 Unauthorized</c> response.</exception>
     Task<DataResponse<SpectatorSubsessionIds>> GetSpectatorSubsessionIdentifiersAsync(Common.EventType[]? eventTypes = null, CancellationToken cancellationToken = default);
 
+    /// <summary>Retrieves the current subsession identifiers available to spectate.</summary>
+    /// <param name="eventTypes">Optional, if supplied limits the types of event subsessions to include. Defaults to all.</param>
+    /// <param name="seasonIds">Optional, if supplied limits the seasons to include. Defaults to all.</param>
+    /// <param name="cancellationToken">A token to allow the operation to be cancelled.</param>
+    /// <returns>A <see cref="DataResponse{TData}"/> containing a <see cref="MemberRecap"/> object.</returns>
+    /// <exception cref="InvalidOperationException">If the client is not currently authenticated.</exception>
+    /// <exception cref="iRacingDataClientException">If there's a problem processing the result.</exception>
+    /// <exception cref="iRacingUnauthorizedResponseException">If the iRacing API returns a <c>401 Unauthorized</c> response.</exception>
+    Task<DataResponse<SpectatorDetails>> GetSpectatorSubsessionDetailsAsync(Common.EventType[]? eventTypes = null, int[]? seasonIds = null, CancellationToken cancellationToken = default);
+
     /// <summary>Build a collection of URIs which resolve to screenshots of the track.</summary>
     /// <param name="track">The track detail for the circuit you want screenshots for.</param>
     /// <param name="trackAssets">The related track assets detail for the same circuit as <paramref name="track"/>.</param>
@@ -709,4 +719,17 @@ public interface IDataClient
     /// <returns>A <see cref="Task"/> that resolves to a collection of <see cref="Uri"/> objects containing links to images of the track or an empty collection.</returns>
     /// <exception cref="ArgumentOutOfRangeException">The <paramref name="trackId"/> value given could not be resolved to a valid track or located in the track assets.</exception>
     Task<IEnumerable<Uri>> GetTrackAssetScreenshotUrisAsync(int trackId, CancellationToken cancellationToken = default);
+
+    /// <summary>Retrieves the weather forecast for the given track and session time.</summary>
+    /// <param name="url">Url received from the <see cref="Series.Weather.WeatherUrl"/> property of the season's <see cref="Schedule"/>.</param>
+    /// <param name="cancellationToken">A token to allow the operation to be cancelled.</param>
+    /// <returns>A collection of <see cref="WeatherForecast"/> objects detailing the forecasted weather.</returns>
+    Task<IEnumerable<WeatherForecast>> GetWeatherForecastFromUrlAsync(string url, CancellationToken cancellationToken = default);
+
+    /// <summary>Retrieve a comma separated value (CSV) file containing driver statistics for the given category.</summary>
+    /// <param name="categoryId">A valid category identifier.</param>
+    /// <param name="cancellationToken">A token to allow the operation to be cancelled.</param>
+    /// <returns>A <see cref="Task"/> that resolves to the content of the CSV.</returns>
+    /// <seealso cref="Constants.Category"/>
+    Task<DriverStatisticsCsvFile> GetDriverStatisticsByCategoryCsvAsync(int categoryId, CancellationToken cancellationToken = default);
 }
