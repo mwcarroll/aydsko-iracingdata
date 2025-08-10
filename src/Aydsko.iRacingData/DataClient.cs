@@ -2342,7 +2342,7 @@ public class DataClient(HttpClient httpClient,
                 HandleUnsuccessfulResponse(response, responseContent, logger);
             }
 
-            var headerData = await response.Content.ReadFromJsonAsync(jsonTypeInfo, cancellationToken: cancellationToken)
+            TData headerData = await response.Content.ReadFromJsonAsync(jsonTypeInfo, cancellationToken: cancellationToken)
                                                    .ConfigureAwait(false)
                              ?? throw new iRacingDataClientException("Data not found.");
 
@@ -2404,7 +2404,7 @@ public class DataClient(HttpClient httpClient,
 
             var (infoLink, headers) = await BuildLinkResultAsync(infoLinkUri, cancellationToken).ConfigureAwait(false);
 
-            var headerData = (await httpClient.GetFromJsonAsync(infoLink.Link, jsonTypeInfo, cancellationToken).ConfigureAwait(false))
+            TData headerData = (await httpClient.GetFromJsonAsync(infoLink.Link, jsonTypeInfo, cancellationToken).ConfigureAwait(false))
                              ?? throw new iRacingDataClientException("Data not found.");
 
             var searchResults = new List<TChunkData>();
