@@ -1,32 +1,7 @@
-﻿BREAKING CHANGES:
+BREAKING CHANGES:
+- All references to iRacing Clubs have been removed. iRacing no longer supports Clubs (see: https://forums.iracing.com/discussion/77912/disbanding-of-clubs-and-raising-of-flags)
 
- - "RecentEvents" type:
-   - Properly interpret "BestLapTime" as "TimeSpan" similar to other times
-   - "PercentRank" is now a "decimal" type instead of "int"
-
- - "ResultsWeather" type:
-   - Removed "SimulatedStartUtcTime" and "SimulatedStartUtcOffset" fields
-   - Changed data type of "SimulatedStartTime" field to "DateTime"
-
- - "Results.CarsInClass" type:
-   - Removed "PackageId" field
-
- - "Results.ResultsCarClasses" type:
-   - Removed "RelativeSpeed" field
-
- - "Schedule" type:
-   - Removed "SimulatedTimeMultiplier" field
-
- - "Series.Weather" type:
-   - Removed "SimulatedStartUtcTime" field
-
-
-
-Fixes / Changes:
-
- - Incorrect datatype for RecentEvents.PercentRank field (Issue: #210)
-
- - 2024 Season 3 Patch 2 Field Changes (Results & Series Seasons) (Issue: #211)
-   - "SubSessionResult" type additional fields "NumberOfDrivers", "EventBestLapTime", "SessionSplits"
-   - "Result" type additional field "CarName"
-   - "Results.ResultsCarClasses" type new fields "StrengthOfField" and "NumberOfEntries"
+FIXES:
+- Update League, League Season, and League Session calls. Including weather for League Sessions. (Issue #237)
+- Implement the "/data/lookup/flairs" endpoint to retrieve available flair, or driver flags. (Issue #238)
+- Implement Track Package Id based paths for logo files. (Issue #240)

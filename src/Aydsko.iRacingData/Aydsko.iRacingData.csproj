@@ -1,16 +1,15 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFrameworks>netstandard2.0;net6.0;net8.0</TargetFrameworks>
+    <TargetFrameworks>netstandard2.0;net8.0</TargetFrameworks>
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
 
     <!-- Package Validation (https://docs.microsoft.com/en-us/dotnet/fundamentals/package-validation/overview) -->
     <EnablePackageValidation>true</EnablePackageValidation>
-    <PackageValidationBaselineVersion>2402.2.0</PackageValidationBaselineVersion>
+    <PackageValidationBaselineVersion>2404.5.0</PackageValidationBaselineVersion>
     <GenerateCompatibilitySuppressionFile>true</GenerateCompatibilitySuppressionFile>
     <EnableStrictModeForCompatibleFrameworksInPackage>true</EnableStrictModeForCompatibleFrameworksInPackage>
     <EnableStrictModeForCompatibleTfms>true</EnableStrictModeForCompatibleTfms>
-
     <ImplicitUsings>enable</ImplicitUsings>
 
     <!-- Generate Documentation Comments and skip warnings for undocumented members. -->
@@ -21,13 +20,10 @@
   <PropertyGroup>
     <!-- Publish the repository URL in the built .nupkg (in the NuSpec <Repository> element) -->
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
-
     <!-- Embed source files that are not tracked by the source control manager in the PDB -->
     <EmbedUntrackedSources>true</EmbedUntrackedSources>
-
     <!-- Recommended: Embed symbols containing Source Link in the main file (exe/dll) -->
     <DebugType>embedded</DebugType>
-
     <PackageIcon>Aydsko iRacing Data API Icon.png</PackageIcon>
     <PackageReadmeFile>Package README.md</PackageReadmeFile>
     <PackageReleaseNotes Condition="Exists('$(MSBuildProjectDirectory)/Package Release Notes.txt')">$([System.IO.File]::ReadAllText("$(MSBuildProjectDirectory)/Package Release Notes.txt"))</PackageReleaseNotes>
@@ -40,7 +36,9 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="Aydsko.iRacingData.IntegrationTests" />
     <InternalsVisibleTo Include="Aydsko.iRacingData.UnitTests" />
+    <InternalsVisibleTo Include="LINQPadQuery" />
     <AssemblyAttribute Include="System.Diagnostics.CodeAnalysis.SuppressMessageAttribute">
       <_Parameter1>Style</_Parameter1>
       <_Parameter2>IDE1006:Naming Styles</_Parameter2>
@@ -65,27 +63,25 @@
       <_Parameter4>Scope = "module"</_Parameter4>
       <_Parameter4_IsLiteral>true</_Parameter4_IsLiteral>
     </AssemblyAttribute>
-    <InternalsVisibleTo Include="LINQPadQuery" />
-    <InternalsVisibleTo Include="Aydsko.iRacingData.IntegrationTests" />
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.Extensions.Caching.Abstractions" Version="8.0.0" />
-    <PackageReference Include="Microsoft.Extensions.Http" Version="8.0.0" />
-    <PackageReference Include="Microsoft.SourceLink.GitHub" Version="8.0.0">
+    <PackageReference Include="Microsoft.Extensions.Caching.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Http" />
+    <PackageReference Include="Microsoft.SourceLink.GitHub">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
-    <PackageReference Include="Microsoft.VisualStudio.Threading.Analyzers" Version="17.9.28">
+    <PackageReference Include="Microsoft.VisualStudio.Threading.Analyzers">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
-    <PackageReference Include="MinVer" Version="5.0.0">
+    <PackageReference Include="MinVer">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
-    <PackageReference Include="System.Text.Json" Version="8.0.3" Condition="'$(TargetFramework)' == 'netstandard2.0'" />
-    <PackageReference Include="System.Net.Http.Json" Version="8.0.0" Condition="'$(TargetFramework)' == 'netstandard2.0'" />
+    <PackageReference Include="System.Text.Json" Condition="'$(TargetFramework)' == 'netstandard2.0'" />
+    <PackageReference Include="System.Net.Http.Json" Condition="'$(TargetFramework)' == 'netstandard2.0'" />
   </ItemGroup>
 
   <ItemGroup>

@@ -17,12 +17,6 @@ public class SeasonDriverStanding
     [JsonPropertyName("division")]
     public int Division { get; set; }
 
-    [JsonPropertyName("club_id")]
-    public int ClubId { get; set; }
-
-    [JsonPropertyName("club_name")]
-    public string ClubName { get; set; } = null!;
-
     [JsonPropertyName("license")]
     public License License { get; set; } = null!;
 
@@ -45,13 +39,13 @@ public class SeasonDriverStanding
     public int Poles { get; set; }
 
     [JsonPropertyName("avg_start_position")]
-    public int AverageStartPosition { get; set; }
+    public decimal AverageStartPosition { get; set; }
 
     [JsonPropertyName("avg_finish_position")]
-    public int AverageFinishPosition { get; set; }
+    public decimal AverageFinishPosition { get; set; }
 
     [JsonPropertyName("avg_field_size")]
-    public int AverageFieldSize { get; set; }
+    public decimal AverageFieldSize { get; set; }
 
     [JsonPropertyName("laps")]
     public int Laps { get; set; }

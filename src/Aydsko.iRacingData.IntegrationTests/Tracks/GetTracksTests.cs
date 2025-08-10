@@ -2,13 +2,12 @@
 // This file is licensed to you under the MIT license.
 
 using Aydsko.iRacingData.Tracks;
-using Microsoft.Extensions.Caching.Memory;
 
 namespace Aydsko.iRacingData.IntegrationTests.Tracks;
 
 internal sealed class GetTracksTests : DataClientIntegrationFixture
 {
-    private Track[] tracksData;
+    private Track[] tracksData = default!;
 
     [OneTimeSetUp]
     public async Task GetTrackDataAsync()

@@ -7,7 +7,7 @@ using System.Reflection;
 using System.Text;
 
 #if NET6_0_OR_GREATER
-using System.Reflection.Metadata;
+//using System.Reflection.Metadata;
 #else
 using System.Collections;
 using System.Net;
@@ -15,16 +15,16 @@ using System.Net;
 
 namespace Aydsko.iRacingData;
 
-static internal class Extensions
+internal static class Extensions
 {
     /// <summary>Add the parameter with the property's <see cref="JsonPropertyNameAttribute.Name"/> as the key and it's value if that value is not null.</summary>
     /// <typeparam name="T">Type of the property.</typeparam>
     /// <param name="parameters">Collection of parameters to add to.</param>
     /// <param name="parameter">An expression which accesses the property.</param>
     /// <exception cref="ArgumentException">The expression couldn't be properly understood by the method.</exception>
-    static internal void AddParameterIfNotNull<T>(this IDictionary<string, object?> parameters, Expression<Func<T>> parameter)
+    internal static void AddParameterIfNotNull<T>(this IDictionary<string, object?> parameters, Expression<Func<T>> parameter)
     {
-#if (NET6_0_OR_GREATER)
+#if NET6_0_OR_GREATER
         ArgumentNullException.ThrowIfNull(parameter);
 #else
         if (parameter is null)
@@ -55,12 +55,12 @@ static internal class Extensions
         parameters.Add(new(parameterName, parameterValue));
     }
 
-    static internal Uri ToUrlWithQuery(this string url, IEnumerable<KeyValuePair<string, object?>> parameters)
+    internal static Uri ToUrlWithQuery(this string url, IEnumerable<KeyValuePair<string, object?>> parameters)
     {
         var builder = new UriBuilder(url);
 
         var queryBuilder = new StringBuilder();
-        queryBuilder.Append(builder.Query.TrimStart('?'));
+        _ = queryBuilder.Append(builder.Query.TrimStart('?'));
 
         foreach (var parameter in parameters)
         {
@@ -150,9 +150,9 @@ static internal class Extensions
         }
     }
 
-#if (NET6_0_OR_GREATER == false)
+#if NET6_0_OR_GREATER == false
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Globalization", "CA1304:Specify CultureInfo", Justification = "<Pending>")]
-    static internal CookieCollection GetAllCookies(this CookieContainer container)
+    internal static CookieCollection GetAllCookies(this CookieContainer container)
     {
         var result = new CookieCollection();
 
@@ -165,13 +165,12 @@ static internal class Extensions
         foreach (string key in table.Keys)
         {
             var item = table[key];
-            var items = item.GetType().InvokeMember("m_list",
+
+            if (item.GetType().InvokeMember("m_list",
                                                     BindingFlags.NonPublic | BindingFlags.GetField | BindingFlags.Instance,
                                                     null,
                                                     item,
-                                                    null) as SortedList;
-
-            if (items is null)
+                                                    null) is not SortedList items)
             {
                 break;
             }
