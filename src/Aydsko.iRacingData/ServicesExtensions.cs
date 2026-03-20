@@ -1,9 +1,8 @@
-﻿// © 2023-2024 Adrian Clark
+﻿// © Adrian Clark - Aydsko.iRacingData
 // This file is licensed to you under the MIT license.
 
-using System.Net;
 using System.Reflection;
-using Aydsko.iRacingData.Tracks;
+using Aydsko.iRacingData.Exceptions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
@@ -11,24 +10,6 @@ namespace Aydsko.iRacingData;
 
 public static class ServicesExtensions
 {
-    /// <summary>Add required types for iRacing Data API to the service collection.</summary>
-    /// <param name="services">The service collection to configure.</param>
-    /// <returns>The http client builder for further configuration.</returns>
-    /// <exception cref="ArgumentNullException">One of the arguments is <see langword="null"/>.</exception>
-    public static IHttpClientBuilder AddIRacingDataApi(this IServiceCollection services)
-    {
-#if NET6_0_OR_GREATER
-        ArgumentNullException.ThrowIfNull(services);
-#else
-        if (services is null)
-        {
-            throw new ArgumentNullException(nameof(services));
-        }
-#endif
-
-        return services.AddIRacingDataApiInternal((_) => { }, false);
-    }
-
     /// <summary>Add required types for iRacing Data API to the service collection.</summary>
     /// <param name="services">The service collection to configure.</param>
     /// <param name="configureOptions">Action to configure the options for the API client.</param>
@@ -52,24 +33,6 @@ public static class ServicesExtensions
 #endif
 
         return services.AddIRacingDataApiInternal(configureOptions, false);
-    }
-
-    /// <summary>Add required types for iRacing Data API with caching enabled to the service collection.</summary>
-    /// <param name="services">The service collection to configure.</param>
-    /// <returns>The http client builder for further configuration.</returns>
-    /// <exception cref="ArgumentNullException">One of the arguments is <see langword="null"/>.</exception>
-    public static IHttpClientBuilder AddIRacingDataApiWithCaching(this IServiceCollection services)
-    {
-#if NET6_0_OR_GREATER
-        ArgumentNullException.ThrowIfNull(services);
-#else
-        if (services is null)
-        {
-            throw new ArgumentNullException(nameof(services));
-        }
-#endif
-
-        return services.AddIRacingDataApiInternal((_) => { }, true);
     }
 
     /// <summary>Add required types for iRacing Data API with caching enabled to the service collection.</summary>
@@ -110,28 +73,57 @@ public static class ServicesExtensions
         }
 #endif
 
-        services.TryAddSingleton(new CookieContainer());
-#pragma warning disable CS0618 // Type or member is obsolete
-        services.TryAddTransient<TrackScreenshotService>();
-#pragma warning restore CS0618 // Type or member is obsolete
-
         var options = new iRacingDataClientOptions();
         configureOptions.Invoke(options);
+
+        if (!Uri.TryCreate(options.ApiBaseUrl, UriKind.Absolute, out var _))
+        {
+            throw new iRacingDataClientException($"Invalid or missing \"{nameof(iRacingDataClientOptions.ApiBaseUrl)}\" value. Must be populated with an absolute URL.");
+        }
+
+        if (!Uri.TryCreate(options.AuthServiceBaseUrl, UriKind.Absolute, out var _))
+        {
+            throw new iRacingDataClientException($"Invalid or missing \"{nameof(iRacingDataClientOptions.AuthServiceBaseUrl)}\" value. Must be populated with an absolute URL.");
+        }
+
         services.AddSingleton(options);
 
         var userAgentValue = CreateUserAgentValue(options);
 
-        var httpClientBuilder = (includeCaching ? services.AddHttpClient<IDataClient, CachingDataClient>() : services.AddHttpClient<IDataClient, DataClient>())
-                                .ConfigureHttpClient(httpClient => httpClient.DefaultRequestHeaders.UserAgent.ParseAdd(userAgentValue))
-                                .ConfigurePrimaryHttpMessageHandler(() =>
-                                {
-                                    var handler = new HttpClientHandler
-                                    {
-                                        UseCookies = true,
-                                        CookieContainer = services.BuildServiceProvider().GetRequiredService<CookieContainer>()
-                                    };
-                                    return handler;
-                                });
+        services.TryAddSingleton(TimeProvider.System);
+
+        if (includeCaching)
+        {
+            services.AddTransient<IApiClient, CachingApiClient>();
+        }
+        else
+        {
+            services.AddTransient<IApiClient, ApiClient>();
+        }
+
+        services.AddTransient<IDataClient, DataClient>();
+
+        IHttpClientBuilder httpClientBuilder;
+
+        if (options.OAuthTokenResponseCallback is not null)
+        {
+            httpClientBuilder = services.AddHttpClient<IAuthenticatingHttpClient, OAuthCallbackAuthenticatingApiClient>();
+        }
+        else if (options.TokenSourceFactory is not null)
+        {
+            services.AddTransient(options.TokenSourceFactory);
+            httpClientBuilder = services.AddHttpClient<IAuthenticatingHttpClient, OAuthTokenSourceApiClient>();
+        }
+        else if (!string.IsNullOrWhiteSpace(options.ClientId) && !string.IsNullOrWhiteSpace(options.ClientSecret))
+        {
+            httpClientBuilder = services.AddHttpClient<IAuthenticatingHttpClient, PasswordLimitedOAuthAuthenticatingHttpClient>();
+        }
+        else
+        {
+            throw new iRacingDataClientException("Invalid configuration for iRacing authentication. You must configure OAuth authentication using the \"UseOAuthTokenSource\" method on the options object.");
+        }
+
+        httpClientBuilder.ConfigureHttpClient(httpClient => httpClient.DefaultRequestHeaders.UserAgent.ParseAdd(userAgentValue));
 
         return httpClientBuilder;
     }

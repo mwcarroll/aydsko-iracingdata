@@ -1,4 +1,4 @@
-﻿// © 2023 Adrian Clark
+﻿// © Adrian Clark - Aydsko.iRacingData
 // This file is licensed to you under the MIT license.
 
 using System.Net;
@@ -25,15 +25,46 @@ public class iRacingDataClientOptions
     public bool PasswordIsEncoded { get; set; }
 
     /// <summary>Called to retrieve cookie values stored from a previous authentication.</summary>
+    [Obsolete("Legacy username/password authentication is deprecated by iRacing. You must use OAuth authentication instead. See https://oauth.iracing.com/oauth2/book/auth_overview.html for more information.", true)]
     public Func<CookieCollection>? RestoreCookies { get; set; }
 
     /// <summary>After a successful authentication called with the cookies to allow them to be saved.</summary>
     /// <remarks>
     /// <para>One of the cookies returned in this collection <c>irsso_membersv2</c> may be used to authenticate with the <c>/membersite</c> and <c>/memberstats</c> endpoints on the classic site's API.</para>
     /// </remarks>
+    [Obsolete("Legacy username/password authentication is deprecated by iRacing. You must use OAuth authentication instead. See https://oauth.iracing.com/oauth2/book/auth_overview.html for more information.", true)]
     public Action<CookieCollection>? SaveCookies { get; set; }
 
-    /// <summary>The source of the current date and time in UTC for the library.</summary>
-    /// <remarks>Defaults to <see cref="DateTimeOffset.UtcNow"/>.</remarks>
-    public Func<DateTimeOffset>? CurrentDateTimeSource { get; set; }
+    /// <summary>The <c>client_id</c> value for <c>password_limited</c> OAuth flow.</summary>
+    /// <seealso href="https://oauth.iracing.com/oauth2/book/token_endpoint.html#password-limited-grant" />
+    public string? ClientId { get; set; }
+
+    /// <summary>The <c>client_secret</c> value for <c>password_limited</c> OAuth flow.</summary>
+    /// <seealso href="https://oauth.iracing.com/oauth2/book/token_endpoint.html#password-limited-grant" />
+    public string? ClientSecret { get; set; }
+
+    /// <summary>If <see langword="true" /> indicates the <see cref="ClientSecret"/> property value is already encoded ready for submission to the iRacing API.</summary>
+    /// <seealso href="https://oauth.iracing.com/oauth2/book/token_endpoint.html#client-secret-and-user-password-masking" />
+    public bool ClientSecretIsEncoded { get; set; }
+
+    /// <summary>The base URL for the iRacing "/data" API. All calls will be made relative to this.</summary>
+    /// <remarks>
+    /// <para>This should not be changed unless you are sure you need an alternate endpoint.</para>
+    /// <para>This will default to <c>https://members-ng.iracing.com</c>.</para>
+    /// </remarks>
+    public string ApiBaseUrl { get; set; } = "https://members-ng.iracing.com";
+
+    /// <summary>The base URL for the iRacing Auth Service. All OAuth calls will be made relative to this.</summary>
+    /// <remarks>
+    /// <para>This should not be changed unless you are sure you need an alternate endpoint.</para>
+    /// <para>This will default to <c>https://oauth.iracing.com</c>.</para>
+    /// </remarks>
+    public string AuthServiceBaseUrl { get; set; } = "https://oauth.iracing.com";
+
+    /// <summary>Callback to allow the library to request an iRacing OAuth token.</summary>
+    /// <remarks>Intended to be used with the &quot;Authorization Code Grant&quot; process.</remarks>
+    /// <seealso href="https://oauth.iracing.com/oauth2/book/auth_overview.html"/>
+    public GetOAuthTokenResponse? OAuthTokenResponseCallback { get; set; }
+
+    internal Func<IServiceProvider, IOAuthTokenSource>? TokenSourceFactory { get; set; }
 }

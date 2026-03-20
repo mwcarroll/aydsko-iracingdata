@@ -12,10 +12,10 @@ public class SeasonSeries
     public object? AllowedSeasonMembers { get; set; }
 
     [JsonPropertyName("car_class_ids")]
-    public int[] CarClassIds { get; set; } = Array.Empty<int>();
+    public int[] CarClassIds { get; set; } = [];
 
     [JsonPropertyName("car_types")]
-    public CarTypes[] CarTypes { get; set; } = Array.Empty<CarTypes>();
+    public CarTypes[] CarTypes { get; set; } = [];
 
     [JsonPropertyName("caution_laps_do_not_count")]
     public bool CautionLapsDoNotCount { get; set; }
@@ -24,7 +24,7 @@ public class SeasonSeries
     public bool Complete { get; set; }
 
     [JsonPropertyName("cross_license")]
-    public bool CrossLicense { get; set; }
+    public bool IsCrossLicense { get; set; }
 
     [JsonPropertyName("driver_change_rule")]
     public int DriverChangeRule { get; set; }
@@ -95,8 +95,14 @@ public class SeasonSeries
     [JsonPropertyName("official")]
     public bool Official { get; set; }
 
+    [JsonIgnore, Obsolete($"Use \"{nameof(OpenPracticeDurationMinutes)}\" instead.")]
+    public int OpDuration { get => OpenPracticeDurationMinutes; set => OpenPracticeDurationMinutes = value; }
+
     [JsonPropertyName("op_duration")]
-    public int OpDuration { get; set; }
+    public int OpenPracticeDurationMinutes { get; set; }
+
+    [JsonIgnore]
+    public TimeSpan OpenPracticeDuration => TimeSpan.FromMinutes(OpenPracticeDurationMinutes);
 
     [JsonPropertyName("open_practice_session_type_id")]
     public int OpenPracticeSessionTypeId { get; set; }
@@ -129,7 +135,7 @@ public class SeasonSeries
     public string ScheduleDescription { get; set; } = default!;
 
     [JsonPropertyName("schedules")]
-    public Schedule[] Schedules { get; set; } = Array.Empty<Schedule>();
+    public Schedule[] Schedules { get; set; } = [];
 
     [JsonPropertyName("season_id")]
     public int SeasonId { get; set; }
@@ -159,7 +165,7 @@ public class SeasonSeries
     public bool StartOnQualTire { get; set; }
 
     [JsonPropertyName("track_types")]
-    public TrackTypes[] TrackTypes { get; set; } = Array.Empty<TrackTypes>();
+    public TrackTypes[] TrackTypes { get; set; } = [];
 
     [JsonPropertyName("unsport_conduct_rule_mode")]
     public int UnsportConductRuleMode { get; set; }

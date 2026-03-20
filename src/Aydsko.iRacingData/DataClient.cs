@@ -1,16 +1,7 @@
 ﻿// © Adrian Clark - Aydsko.iRacingData
 // This file is licensed to you under the MIT license.
 
-using System.Diagnostics;
 using System.Globalization;
-using System.Net;
-using System.Net.Http.Headers;
-using System.Net.Http.Json;
-using System.Reflection;
-using System.Security.Cryptography;
-using System.Text;
-using System.Text.Json;
-using System.Text.Json.Serialization.Metadata;
 using Aydsko.iRacingData.Cars;
 using Aydsko.iRacingData.Constants;
 using Aydsko.iRacingData.Exceptions;
@@ -30,188 +21,116 @@ namespace Aydsko.iRacingData;
 /// <summary>Default implementation of the client to access the iRacing "/data" API endpoints.</summary>
 /// <remarks>
 /// Instead of creating an instance of this class directly, it is recommended that you register the library components in the services
-/// collection using <see cref="ServicesExtensions.AddIRacingDataApi(Microsoft.Extensions.DependencyInjection.IServiceCollection)"/>
+/// collection using <see cref="ServicesExtensions.AddIRacingDataApi(Microsoft.Extensions.DependencyInjection.IServiceCollection, Action{iRacingDataClientOptions})"/>
 /// and resolve <see cref="IDataClient"/> service from there.
 /// </remarks>
-public class DataClient(HttpClient httpClient,
-                        ILogger<DataClient> logger,
-                        iRacingDataClientOptions options,
-                        CookieContainer cookieContainer)
-    : IDataClient, IDisposable
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1848:Use the LoggerMessage delegates", Justification = "Too many separate messages once parameters are involved.")]
+internal sealed class DataClient(IApiClient apiClient,
+                                 iRacingDataClientOptions options,
+                                 ILogger<DataClient> logger,
+                                 TimeProvider timeProvider)
+    : IDataClient
 {
-    private static readonly ActivitySource activitySource = new("Aydsko.iRacingData", typeof(DataClient).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "");
-    private readonly SemaphoreSlim loginSemaphore = new(1, 1);
-    private bool disposedValue;
-
-    public bool IsLoggedIn { get; private set; }
-
-    /// <inheritdoc/>
-    public void UseUsernameAndPassword(string username, string password, bool passwordIsEncoded)
-    {
-        if (string.IsNullOrWhiteSpace(username))
-        {
-            throw iRacingClientOptionsValueMissingException.Create(nameof(username));
-        }
-
-        if (string.IsNullOrWhiteSpace(password))
-        {
-            throw iRacingClientOptionsValueMissingException.Create(nameof(password));
-        }
-
-        options.Username = username;
-        options.Password = password;
-        options.PasswordIsEncoded = passwordIsEncoded;
-
-        // If the username & password has been updated likely the authentication needs to run again.
-        IsLoggedIn = false;
-    }
-
-    /// <inheritdoc/>
-    public void UseUsernameAndPassword(string username, string password)
-    {
-        UseUsernameAndPassword(username, password, false);
-    }
-
-    public async Task LoginExternalAsync(CancellationToken cancellationToken = default)
-    {
-        await LoginInternalAsync(cancellationToken).ConfigureAwait(false);
-    }
+    private readonly Uri apiBaseUrl = new(options.ApiBaseUrl);
 
     /// <inheritdoc />
     public async Task<DataResponse<IReadOnlyDictionary<string, CarAssetDetail>>> GetCarAssetDetailsAsync(CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("Get Car Asset Details");
+        logger.LogDebug("Get Car Asset Details");
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Get Car Asset Details");
 
-        return await CreateResponseViaInfoLinkAsync(new Uri("https://members-ng.iracing.com/data/car/assets"),
-                                                    CarAssetDetailDictionaryContext.Default.IReadOnlyDictionaryStringCarAssetDetail,
-                                                    cancellationToken).ConfigureAwait(false);
+        var carAssetDetailsUrl = new Uri(apiBaseUrl, "/data/car/assets");
+
+        var response = await apiClient.CreateResponseViaIntermediateResultAsync(carAssetDetailsUrl,
+                                                                                LinkResultContext.Default.LinkResult,
+                                                                                infoLinkResult => (new Uri(infoLinkResult.Link), infoLinkResult.Expires),
+                                                                                CarAssetDetailDictionaryContext.Default.IReadOnlyDictionaryStringCarAssetDetail,
+                                                                                cancellationToken).ConfigureAwait(false);
+
+        return response;
     }
 
     /// <inheritdoc />
     public async Task<DataResponse<Cars.CarInfo[]>> GetCarsAsync(CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("Get Cars");
+        logger.LogDebug("Get Cars");
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Get Cars");
 
-        return await CreateResponseViaInfoLinkAsync(new Uri("https://members-ng.iracing.com/data/car/get"),
-                                                    CarInfoArrayContext.Default.CarInfoArray,
-                                                    cancellationToken).ConfigureAwait(false);
+        var infoLinkUri = new Uri(apiBaseUrl, "/data/car/get");
+
+        var response = await apiClient.CreateResponseViaIntermediateResultAsync(infoLinkUri,
+                                                                                LinkResultContext.Default.LinkResult,
+                                                                                infoLinkResult => (new Uri(infoLinkResult.Link), infoLinkResult.Expires),
+                                                                                CarInfoArrayContext.Default.CarInfoArray,
+                                                                                cancellationToken)
+                                      .ConfigureAwait(false);
+
+        return response;
     }
 
     /// <inheritdoc />
     public async Task<DataResponse<Common.CarClass[]>> GetCarClassesAsync(CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("Get Car Classes");
+        logger.LogDebug("Get Car Classes");
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Get Car Classes");
 
-        var carClassUrl = new Uri("https://members-ng.iracing.com/data/carclass/get");
-        return await CreateResponseViaInfoLinkAsync(carClassUrl, CarClassArrayContext.Default.CarClassArray, cancellationToken).ConfigureAwait(false);
+        var carClassUrl = new Uri(apiBaseUrl, "/data/carclass/get");
+
+        var response = await apiClient.CreateResponseViaIntermediateResultAsync(carClassUrl,
+                                                                                LinkResultContext.Default.LinkResult,
+                                                                                infoLinkResult => (new Uri(infoLinkResult.Link), infoLinkResult.Expires),
+                                                                                CarClassArrayContext.Default.CarClassArray,
+                                                                                cancellationToken)
+                                      .ConfigureAwait(false);
+
+        return response;
     }
 
     /// <inheritdoc />
     public async Task<DataResponse<Division[]>> GetDivisionsAsync(CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("Get Divisions");
+        logger.LogDebug("Get Divisions");
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Get Divisions");
 
-        var attempts = 0;
-        var constantsDivisionsUrl = new Uri("https://members-ng.iracing.com/data/constants/divisions");
-
-    RetryDivisions:
-        try
-        {
-            await EnsureLoggedInAsync(cancellationToken).ConfigureAwait(false);
-
-            var constantsDivisionsResponse = await httpClient.GetAsync(constantsDivisionsUrl, cancellationToken).ConfigureAwait(false);
-
-            var data = await constantsDivisionsResponse.Content.ReadFromJsonAsync(DivisionArrayContext.Default.DivisionArray, cancellationToken).ConfigureAwait(false)
-                       ?? throw new iRacingDataClientException("Data not found.");
-
-            return BuildDataResponse(constantsDivisionsResponse.Headers, data, logger)!;
-        }
-        catch (iRacingUnauthorizedResponseException unAuthEx)
-        {
-            attempts++;
-            if (attempts < 2)
-            {
-                _ = activity?.AddEvent(new("Retrying unauthorized response", tags: new([new("AttemptCount", attempts)])));
-                logger.RetryingUnauthorizedResponse(unAuthEx, constantsDivisionsUrl, attempts, 2);
-                goto RetryDivisions;
-            }
-            throw;
-        }
+        var constantsDivisionsUrl = new Uri(apiBaseUrl, "/data/constants/divisions");
+        return await apiClient.GetDataResponseAsync(constantsDivisionsUrl,
+                                                   DivisionArrayContext.Default.DivisionArray,
+                                                   cancellationToken)
+                              .ConfigureAwait(false);
     }
 
     /// <inheritdoc />
     public async Task<DataResponse<Category[]>> GetCategoriesAsync(CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("Get Categories");
+        logger.LogDebug("Get Categories");
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Get Categories");
 
-        var attempts = 0;
-        var constantsCategoriesUrl = new Uri("https://members-ng.iracing.com/data/constants/categories");
-
-    RetryCategories:
-        try
-        {
-            await EnsureLoggedInAsync(cancellationToken).ConfigureAwait(false);
-
-            var constantsCategoriesResponse = await httpClient.GetAsync(constantsCategoriesUrl, cancellationToken)
-                                                             .ConfigureAwait(false);
-
-            var data = await constantsCategoriesResponse.Content.ReadFromJsonAsync(CategoryArrayContext.Default.CategoryArray, cancellationToken)
-                                                               .ConfigureAwait(false)
-                                                               ?? throw new iRacingDataClientException("Data not found.");
-
-            return BuildDataResponse(constantsCategoriesResponse.Headers, data, logger)!;
-        }
-        catch (iRacingUnauthorizedResponseException unAuthEx)
-        {
-            attempts++;
-            if (attempts < 2)
-            {
-                _ = activity?.AddEvent(new("Retrying unauthorized response", tags: new([new("AttemptCount", attempts)])));
-                logger.RetryingUnauthorizedResponse(unAuthEx, constantsCategoriesUrl, attempts, 2);
-                goto RetryCategories;
-            }
-            throw;
-        }
+        var constantsCategoriesUrl = new Uri(apiBaseUrl, "/data/constants/categories");
+        return await apiClient.GetDataResponseAsync(constantsCategoriesUrl,
+                                                   CategoryArrayContext.Default.CategoryArray,
+                                                   cancellationToken)
+                              .ConfigureAwait(false);
     }
 
     /// <inheritdoc />
     public async Task<DataResponse<Constants.EventType[]>> GetEventTypesAsync(CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("Get Event Types");
+        logger.LogDebug("Get Event Types");
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Get Event Types");
 
-        var attempts = 0;
-        var constantsEventTypesUrl = new Uri("https://members-ng.iracing.com/data/constants/event_types");
+        var constantsEventTypesUrl = new Uri(apiBaseUrl, "/data/constants/event_types");
 
-    RetryEventTypes:
-        try
-        {
-            await EnsureLoggedInAsync(cancellationToken).ConfigureAwait(false);
-
-            var constantsEventTypesResponse = await httpClient.GetAsync(constantsEventTypesUrl, cancellationToken).ConfigureAwait(false);
-
-            var data = await constantsEventTypesResponse.Content.ReadFromJsonAsync(EventTypeArrayContext.Default.EventTypeArray, cancellationToken)
-                                                               .ConfigureAwait(false)
-                                                               ?? throw new iRacingDataClientException("Data not found.");
-
-            return BuildDataResponse(constantsEventTypesResponse.Headers, data, logger)!;
-        }
-        catch (iRacingUnauthorizedResponseException unAuthEx)
-        {
-            attempts++;
-            if (attempts < 2)
-            {
-                _ = activity?.AddEvent(new("Retrying unauthorized response", tags: new([new("AttemptCount", attempts)])));
-                logger.RetryingUnauthorizedResponse(unAuthEx, constantsEventTypesUrl, attempts, 2);
-                goto RetryEventTypes;
-            }
-            throw;
-        }
+        return await apiClient.GetDataResponseAsync(constantsEventTypesUrl,
+                                                   EventTypeArrayContext.Default.EventTypeArray,
+                                                   cancellationToken)
+                              .ConfigureAwait(false);
     }
 
     /// <inheritdoc />
     public async Task<DataResponse<CombinedSessionsResult>> ListHostedSessionsCombinedAsync(int? packageId = null, CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("List Hosted Sessions Combined");
+        logger.LogDebug("List Hosted Sessions Combined");
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("List Hosted Sessions Combined");
 
         var queryParameters = new Dictionary<string, object?>();
 
@@ -220,27 +139,41 @@ public class DataClient(HttpClient httpClient,
             queryParameters.Add("package_id", packageId.Value.ToString(CultureInfo.InvariantCulture));
         }
 
-        var queryUrl = "https://members-ng.iracing.com/data/hosted/combined_sessions".ToUrlWithQuery(queryParameters);
+        var queryUrl = new Uri(apiBaseUrl, "/data/hosted/combined_sessions").WithQuery(queryParameters);
 
-        return await CreateResponseViaInfoLinkAsync(queryUrl,
-                                                    CombinedSessionsResultContext.Default.CombinedSessionsResult,
-                                                    cancellationToken).ConfigureAwait(false);
+        var response = await apiClient.CreateResponseViaIntermediateResultAsync(queryUrl,
+                                                                                LinkResultContext.Default.LinkResult,
+                                                                                infoLinkResult => (new Uri(infoLinkResult.Link), infoLinkResult.Expires),
+                                                                                CombinedSessionsResultContext.Default.CombinedSessionsResult,
+                                                                                cancellationToken)
+                                      .ConfigureAwait(false);
+
+        return response;
     }
 
     /// <inheritdoc />
     public async Task<DataResponse<HostedSessionsResult>> ListHostedSessionsAsync(CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("List Hosted Sessions");
+        logger.LogDebug("List Hosted Sessions");
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("List Hosted Sessions");
 
-        return await CreateResponseViaInfoLinkAsync(new Uri("https://members-ng.iracing.com/data/hosted/sessions"),
-                                                    HostedSessionsResultContext.Default.HostedSessionsResult,
-                                                    cancellationToken).ConfigureAwait(false);
+        var infoLinkUri = new Uri(apiBaseUrl, "/data/hosted/sessions");
+
+        var response = await apiClient.CreateResponseViaIntermediateResultAsync(infoLinkUri,
+                                                                                LinkResultContext.Default.LinkResult,
+                                                                                infoLinkResult => (new Uri(infoLinkResult.Link), infoLinkResult.Expires),
+                                                                                HostedSessionsResultContext.Default.HostedSessionsResult,
+                                                                                cancellationToken)
+                                      .ConfigureAwait(false);
+
+        return response;
     }
 
     /// <inheritdoc />
     public async Task<DataResponse<League>> GetLeagueAsync(int leagueId, bool includeLicenses = false, CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("Get League")?.AddTag("LeagueId", leagueId);
+        logger.LogDebug("Get League {LeagueId}", leagueId);
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Get League")?.AddTag("LeagueId", leagueId);
 
         var queryParameters = new Dictionary<string, object?>
         {
@@ -248,17 +181,23 @@ public class DataClient(HttpClient httpClient,
             ["include_licenses"] = includeLicenses.ToString(),
         };
 
-        var getLeagueUrl = "https://members-ng.iracing.com/data/league/get".ToUrlWithQuery(queryParameters);
+        var getLeagueUrl = new Uri(apiBaseUrl, "/data/league/get").WithQuery(queryParameters);
 
-        return await CreateResponseViaInfoLinkAsync(getLeagueUrl,
-                                                    LeagueContext.Default.League,
-                                                    cancellationToken).ConfigureAwait(false);
+        var response = await apiClient.CreateResponseViaIntermediateResultAsync(getLeagueUrl,
+                                                                                LinkResultContext.Default.LinkResult,
+                                                                                infoLinkResult => (new Uri(infoLinkResult.Link), infoLinkResult.Expires),
+                                                                                LeagueContext.Default.League,
+                                                                                cancellationToken)
+                                      .ConfigureAwait(false);
+
+        return response;
     }
 
     /// <inheritdoc />
     public async Task<DataResponse<LeaguePointsSystems>> GetLeaguePointsSystemsAsync(int leagueId, int? seasonId = null, CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("Get League Points Systems")?.AddTag("LeagueId", leagueId);
+        logger.LogDebug("Get League Points Systems for {LeagueId} and {SeasonId}", leagueId, seasonId);
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Get League Points Systems")?.AddTag("LeagueId", leagueId);
 
         var queryParameters = new Dictionary<string, object?>
         {
@@ -270,15 +209,41 @@ public class DataClient(HttpClient httpClient,
             queryParameters.Add("season_id", seasonId.Value.ToString(CultureInfo.InvariantCulture));
         }
 
-        var queryUrl = "https://members-ng.iracing.com/data/league/get_points_systems".ToUrlWithQuery(queryParameters);
+        var queryUrl = new Uri(apiBaseUrl, "/data/league/get_points_systems").WithQuery(queryParameters);
 
-        return await CreateResponseViaInfoLinkAsync(queryUrl, LeaguePointsSystemsContext.Default.LeaguePointsSystems, cancellationToken).ConfigureAwait(false);
+        var response = await apiClient.CreateResponseViaIntermediateResultAsync(queryUrl,
+                                                                                LinkResultContext.Default.LinkResult,
+                                                                                infoLinkResult => (new Uri(infoLinkResult.Link), infoLinkResult.Expires),
+                                                                                LeaguePointsSystemsContext.Default.LeaguePointsSystems,
+                                                                                cancellationToken)
+                                      .ConfigureAwait(false);
+
+        return response;
+    }
+
+    /// <inheritdoc />
+    public async Task<DataResponse<LookupGroup[]>> GetCurrentSeasonLookupAsync(CancellationToken cancellationToken = default)
+    {
+        logger.LogDebug("Get Current Season Lookup");
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Get Current Season Lookup");
+
+        var currentSeasonLookupUrl = new Uri(apiBaseUrl, "/data/lookup/current_season");
+
+        var response = await apiClient.CreateResponseViaIntermediateResultAsync(currentSeasonLookupUrl,
+                                                                                LinkResultContext.Default.LinkResult,
+                                                                                infoLinkResult => (new Uri(infoLinkResult.Link), infoLinkResult.Expires),
+                                                                                LookupGroupArrayContext.Default.LookupGroupArray,
+                                                                                cancellationToken)
+                                      .ConfigureAwait(false);
+
+        return response;
     }
 
     /// <inheritdoc />
     public async Task<DataResponse<CustomerLeagueSessions>> GetCustomerLeagueSessionsAsync(bool mine = false, int? packageId = null, CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("Get Customer League Sessions");
+        logger.LogDebug("Get Customer League Sessions");
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Get Customer League Sessions");
 
         var queryParameters = new Dictionary<string, object?>
         {
@@ -286,28 +251,43 @@ public class DataClient(HttpClient httpClient,
             ["package_id"] = packageId,
         };
 
-        var queryUrl = "https://members-ng.iracing.com/data/league/cust_league_sessions".ToUrlWithQuery(queryParameters);
+        var queryUrl = new Uri(apiBaseUrl, "/data/league/cust_league_sessions").WithQuery(queryParameters);
 
-        return await CreateResponseViaInfoLinkAsync(queryUrl,
-                                                    CustomerLeagueSessionsContext.Default.CustomerLeagueSessions,
-                                                    cancellationToken).ConfigureAwait(false);
+        var response = await apiClient.CreateResponseViaIntermediateResultAsync(queryUrl,
+                                                                                LinkResultContext.Default.LinkResult,
+                                                                                infoLinkResult => (new Uri(infoLinkResult.Link), infoLinkResult.Expires),
+                                                                                CustomerLeagueSessionsContext.Default.CustomerLeagueSessions,
+                                                                                cancellationToken)
+                                      .ConfigureAwait(false);
+
+        return response;
     }
 
     /// <inheritdoc />
     public async Task<DataResponse<LookupGroup[]>> GetLookupsAsync(CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("Get Lookups");
+        logger.LogDebug("Get Lookups");
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Get Lookups");
 
-        return await CreateResponseViaInfoLinkAsync(new Uri("https://members-ng.iracing.com/data/lookup/get?weather=weather_wind_speed_units&weather=weather_wind_speed_max&weather=weather_wind_speed_min&licenselevels=licenselevels"),
-                                                    LookupGroupArrayContext.Default.LookupGroupArray,
-                                                    cancellationToken).ConfigureAwait(false);
+        var lookupsUrl = new Uri(apiBaseUrl, "/data/lookup/get?weather=weather_wind_speed_units&weather=weather_wind_speed_max&weather=weather_wind_speed_min&licenselevels=licenselevels");
+
+        var response = await apiClient.CreateResponseViaIntermediateResultAsync(lookupsUrl,
+                                                                                LinkResultContext.Default.LinkResult,
+                                                                                infoLinkResult => (new Uri(infoLinkResult.Link), infoLinkResult.Expires),
+                                                                                LookupGroupArrayContext.Default.LookupGroupArray,
+                                                                                cancellationToken)
+                                      .ConfigureAwait(false);
+
+        return response;
     }
 
     /// <inheritdoc />
     public async Task<DataResponse<DriverSearchResult[]>> SearchDriversAsync(string searchTerm, int? leagueId = null, CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("Search Drivers")
-                                           ?.AddTag("SearchTerm", searchTerm);
+        logger.LogDebug("Search Drivers for {SearchTerm} in League {LeagueId}", searchTerm, leagueId);
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Search Drivers")
+                                ?.AddTag("SearchTerm", searchTerm)
+                                ?.AddTag("LeagueId", leagueId);
 
         var queryParameters = new Dictionary<string, object?>
         {
@@ -319,37 +299,59 @@ public class DataClient(HttpClient httpClient,
             queryParameters.Add("league_id", leagueId.Value.ToString(CultureInfo.InvariantCulture));
         }
 
-        var queryUrl = "https://members-ng.iracing.com/data/lookup/drivers".ToUrlWithQuery(queryParameters);
+        var queryUrl = new Uri(apiBaseUrl, "/data/lookup/drivers").WithQuery(queryParameters);
 
-        return await CreateResponseViaInfoLinkAsync(queryUrl,
-                                                    DriverSearchResultContext.Default.DriverSearchResultArray,
-                                                    cancellationToken).ConfigureAwait(false);
+        var response = await apiClient.CreateResponseViaIntermediateResultAsync(queryUrl,
+                                                                                LinkResultContext.Default.LinkResult,
+                                                                                infoLinkResult => (new Uri(infoLinkResult.Link), infoLinkResult.Expires),
+                                                                                DriverSearchResultContext.Default.DriverSearchResultArray,
+                                                                                cancellationToken)
+                                      .ConfigureAwait(false);
+
+        return response;
     }
 
     /// <inheritdoc />
     public async Task<DataResponse<LicenseLookup[]>> GetLicenseLookupsAsync(CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("Get License Lookups");
+        logger.LogDebug("Get License Lookups");
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Get License Lookups");
 
-        return await CreateResponseViaInfoLinkAsync(new Uri("https://members-ng.iracing.com/data/lookup/licenses"),
-                                                    LicenseLookupArrayContext.Default.LicenseLookupArray,
-                                                    cancellationToken).ConfigureAwait(false);
+        var infoLinkUri = new Uri(apiBaseUrl, "/data/lookup/licenses");
+
+        var response = await apiClient.CreateResponseViaIntermediateResultAsync(infoLinkUri,
+                                                                                LinkResultContext.Default.LinkResult,
+                                                                                infoLinkResult => (new Uri(infoLinkResult.Link), infoLinkResult.Expires),
+                                                                                LicenseLookupArrayContext.Default.LicenseLookupArray,
+                                                                                cancellationToken)
+                                      .ConfigureAwait(false);
+        return response;
     }
 
     /// <inheritdoc />
     public async Task<DataResponse<FlairLookupResponse>> GetFlairsAsync(CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("Get Flairs");
+        logger.LogDebug("Get Flairs");
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Get Flairs");
 
-        return await CreateResponseViaInfoLinkAsync(new Uri("https://members-ng.iracing.com/data/lookup/flairs"),
-                                                    FlairLookupResponseContext.Default.FlairLookupResponse,
-                                                    cancellationToken).ConfigureAwait(false);
+        var infoLinkUri = new Uri(apiBaseUrl, "/data/lookup/flairs");
+
+        var response = await apiClient.CreateResponseViaIntermediateResultAsync(infoLinkUri,
+                                                              LinkResultContext.Default.LinkResult,
+                                                              infoLinkResult => (new Uri(infoLinkResult.Link), infoLinkResult.Expires),
+                                                              FlairLookupResponseContext.Default.FlairLookupResponse,
+                                                              cancellationToken).ConfigureAwait(false);
+
+        return response;
     }
 
     /// <inheritdoc />
     public async Task<DataResponse<DriverInfo[]>> GetDriverInfoAsync(int[] customerIds, bool includeLicenses, CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("Get Driver Info")?.AddTag("CustomerIds", customerIds);
+        logger.LogDebug("Get Driver Info for Customers {CustomerIds} {IncludeLicenses}", customerIds, includeLicenses);
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Get Driver Info")
+                                ?.AddTag("CustomerIds", customerIds)
+                                ?.AddTag("IncludeLicenses", includeLicenses);
 
         if (customerIds is not { Length: > 0 })
         {
@@ -362,11 +364,14 @@ public class DataClient(HttpClient httpClient,
             ["include_licenses"] = includeLicenses,
         };
 
-        var driverInfoRequestUrl = "https://members-ng.iracing.com/data/member/get".ToUrlWithQuery(queryParameters);
+        var driverInfoRequestUrl = new Uri(apiBaseUrl, "/data/member/get").WithQuery(queryParameters);
 
-        var driverInfoResponse = await CreateResponseViaInfoLinkAsync(driverInfoRequestUrl,
-                                                                      DriverInfoResponseContext.Default.DriverInfoResponse,
-                                                                      cancellationToken).ConfigureAwait(false);
+        var driverInfoResponse = await apiClient.CreateResponseViaIntermediateResultAsync(driverInfoRequestUrl,
+                                                                                          LinkResultContext.Default.LinkResult,
+                                                                                          infoLinkResult => (new Uri(infoLinkResult.Link), infoLinkResult.Expires),
+                                                                                          DriverInfoResponseContext.Default.DriverInfoResponse,
+                                                                                          cancellationToken)
+                                                .ConfigureAwait(false);
 
         return new DataResponse<DriverInfo[]>
         {
@@ -381,7 +386,9 @@ public class DataClient(HttpClient httpClient,
     /// <inheritdoc />
     public async Task<DataResponse<MemberAward[]>> GetDriverAwardsAsync(int? customerId = null, CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("Get Driver Awards")?.AddTag("CustomerId", customerId);
+        logger.LogDebug("Get Driver Awards for Customer {CustomerId}", customerId);
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Get Driver Awards")
+                                ?.AddTag("CustomerId", customerId);
 
         var queryParameters = new Dictionary<string, object?>();
 
@@ -390,42 +397,65 @@ public class DataClient(HttpClient httpClient,
             queryParameters.Add("cust_id", customerId.Value.ToString(CultureInfo.InvariantCulture));
         }
 
-        var queryUrl = "https://members-ng.iracing.com/data/member/awards".ToUrlWithQuery(queryParameters);
-        var (memberAwardsResponse, headers) = await GetResponseWithHeadersFromJsonAsync(queryUrl, MemberAwardResultContext.Default.MemberAwardResult, cancellationToken).ConfigureAwait(false);
+        var queryUrl = new Uri(apiBaseUrl, "/data/member/awards").WithQuery(queryParameters);
 
-        var awardDetails = await GetResponseFromJsonAsync(new Uri(memberAwardsResponse.DataUrl), MemberAwardArrayContext.Default.MemberAwardArray, cancellationToken).ConfigureAwait(false);
-
-        return BuildDataResponse(headers, awardDetails, logger);
+        var response = await apiClient.CreateResponseViaIntermediateResultAsync(queryUrl,
+                                                                                MemberAwardResultContext.Default.MemberAwardResult,
+                                                                                memberAwardResult => (new Uri(memberAwardResult.DataUrl), null),
+                                                                                MemberAwardArrayContext.Default.MemberAwardArray,
+                                                                                cancellationToken)
+                                      .ConfigureAwait(false);
+        return response;
     }
 
     /// <inheritdoc />
     public async Task<DataResponse<MemberAwardInstance>> GetDriverAwardInstanceAsync(int awardId, CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("Get Driver Award Instance")?.AddTag("AwardId", awardId);
+        logger.LogDebug("Get Driver Award Instance for {AwardId}", awardId);
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Get Driver Award Instance")
+                                ?.AddTag("AwardId", awardId);
 
         var queryParameters = new Dictionary<string, object?>()
         {
             ["award_id"] = awardId,
         };
 
-        var queryUrl = "https://members-ng.iracing.com/data/member/award_instances".ToUrlWithQuery(queryParameters);
-        return await CreateResponseViaDataUrlAsync(queryUrl, MemberAwardInstanceContext.Default.MemberAwardInstance, cancellationToken).ConfigureAwait(false);
+        var queryUrl = new Uri(apiBaseUrl, "/data/member/award_instances").WithQuery(queryParameters);
+
+        var response = await apiClient.CreateResponseViaIntermediateResultAsync(queryUrl,
+                                                                                DataUrlResultContext.Default.DataUrlResult,
+                                                                                dataUrlResult => (new Uri(dataUrlResult.DataUrl), null),
+                                                                                MemberAwardInstanceContext.Default.MemberAwardInstance,
+                                                                                cancellationToken)
+                                      .ConfigureAwait(false);
+
+        return response;
     }
 
     /// <inheritdoc />
     public async Task<DataResponse<Member.MemberInfo>> GetMyInfoAsync(CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("Get My Info");
+        logger.LogDebug("Get My Info");
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Get My Info");
 
-        return await CreateResponseViaInfoLinkAsync(new Uri("https://members-ng.iracing.com/data/member/info"),
-                                                    MemberInfoContext.Default.MemberInfo,
-                                                    cancellationToken).ConfigureAwait(false);
+        var memberInfoUrl = new Uri(apiBaseUrl, "/data/member/info");
+
+        var response = await apiClient.CreateResponseViaIntermediateResultAsync(memberInfoUrl,
+                                                                                LinkResultContext.Default.LinkResult,
+                                                                                infoLinkResult => (new Uri(infoLinkResult.Link), infoLinkResult.Expires),
+                                                                                MemberInfoContext.Default.MemberInfo,
+                                                                                cancellationToken)
+                                      .ConfigureAwait(false);
+
+        return response;
     }
 
     /// <inheritdoc />
     public async Task<DataResponse<MemberProfile>> GetMemberProfileAsync(int? customerId = null, CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("Get Member Profile")?.AddTag("CustomerId", customerId);
+        logger.LogDebug("Get Member Profile for {CustomerId}", customerId);
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Get Member Profile")
+                                ?.AddTag("CustomerId", customerId);
 
         var queryParameters = new Dictionary<string, object?>();
 
@@ -434,17 +464,25 @@ public class DataClient(HttpClient httpClient,
             queryParameters.Add("cust_id", customerId.Value.ToString(CultureInfo.InvariantCulture));
         }
 
-        var memberProfileUrl = "https://members-ng.iracing.com/data/member/profile".ToUrlWithQuery(queryParameters);
+        var memberProfileUrl = new Uri(apiBaseUrl, "/data/member/profile").WithQuery(queryParameters);
 
-        return await CreateResponseViaInfoLinkAsync(memberProfileUrl,
-                                                    MemberProfileContext.Default.MemberProfile,
-                                                    cancellationToken).ConfigureAwait(false);
+        var response = await apiClient.CreateResponseViaIntermediateResultAsync(memberProfileUrl,
+                                                                                LinkResultContext.Default.LinkResult,
+                                                                                infoLinkResult => (new Uri(infoLinkResult.Link), infoLinkResult.Expires),
+                                                                                MemberProfileContext.Default.MemberProfile,
+                                                                                cancellationToken)
+                                      .ConfigureAwait(false);
+
+        return response;
     }
 
     /// <inheritdoc />
     public async Task<DataResponse<SubSessionResult>> GetSubSessionResultAsync(int subSessionId, bool includeLicenses, CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("Get SubSession Result")?.AddTag("SubSessionId", subSessionId);
+        logger.LogDebug("Get SubSession Result for {SubSessionId} {IncludeLicenses}", subSessionId, includeLicenses);
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Get SubSession Result")
+                                ?.AddTag("SubSessionId", subSessionId)
+                                ?.AddTag("IncludeLicenses", includeLicenses);
 
         var queryParameters = new Dictionary<string, object?>
         {
@@ -452,17 +490,27 @@ public class DataClient(HttpClient httpClient,
             ["include_licenses"] = includeLicenses,
         };
 
-        var subSessionResultUrl = "https://members-ng.iracing.com/data/results/get".ToUrlWithQuery(queryParameters);
+        var subSessionResultUrl = new Uri(apiBaseUrl, "/data/results/get").WithQuery(queryParameters);
 
-        return await CreateResponseViaInfoLinkAsync(subSessionResultUrl,
-                                                    SubSessionResultContext.Default.SubSessionResult,
-                                                    cancellationToken).ConfigureAwait(false);
+        var response = await apiClient.CreateResponseViaIntermediateResultAsync(subSessionResultUrl,
+                                                                                LinkResultContext.Default.LinkResult,
+                                                                                infoLinkResult => (new Uri(infoLinkResult.Link), infoLinkResult.Expires),
+                                                                                SubSessionResultContext.Default.SubSessionResult,
+                                                                                cancellationToken)
+                                      .ConfigureAwait(false);
+
+        return response;
     }
 
     /// <inheritdoc />
-    public async Task<DataResponse<(SubsessionLapsHeader Header, SubsessionChartLap[] Laps)>> GetSubSessionLapChartAsync(int subSessionId, int simSessionNumber, CancellationToken cancellationToken = default)
+    public async Task<DataResponse<(SubsessionLapsHeader Header, SubsessionChartLap[] Laps)>> GetSubSessionLapChartAsync(int subSessionId,
+                                                                                                                         int simSessionNumber,
+                                                                                                                         CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("Get SubSession Lap Chart")?.AddTag("SubSessionId", subSessionId)?.AddTag("SimSessionNumber", simSessionNumber);
+        logger.LogDebug("Get SubSession Lap Chart for {SubSessionId} session {SimSessionNumber}", subSessionId, simSessionNumber);
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Get SubSession Lap Chart")
+                                ?.AddTag("SubSessionId", subSessionId)
+                                ?.AddTag("SimSessionNumber", simSessionNumber);
 
         var queryParameters = new Dictionary<string, object?>
         {
@@ -470,59 +518,27 @@ public class DataClient(HttpClient httpClient,
             ["simsession_number"] = simSessionNumber.ToString(CultureInfo.InvariantCulture),
         };
 
-        var subSessionLapChartUrl = "https://members-ng.iracing.com/data/results/lap_chart_data".ToUrlWithQuery(queryParameters);
+        var subSessionLapChartUrl = new Uri(apiBaseUrl, "/data/results/lap_chart_data").WithQuery(queryParameters);
 
-        var intermediateResponse = await CreateResponseViaInfoLinkAsync(subSessionLapChartUrl,
-                                                                        SubsessionLapsHeaderContext.Default.SubsessionLapsHeader,
-                                                                        cancellationToken).ConfigureAwait(false);
-
-        var sessionLapsList = new List<SubsessionChartLap>();
-
-        _ = activity?.AddTag("NumberOfResultChunks", intermediateResponse.Data.ChunkInfo.NumberOfChunks);
-
-        if (intermediateResponse.Data.ChunkInfo.NumberOfChunks > 0)
-        {
-            var baseChunkUrl = new Uri(intermediateResponse.Data.ChunkInfo.BaseDownloadUrl);
-
-            foreach (var (chunkFileName, index) in intermediateResponse.Data.ChunkInfo.ChunkFileNames.Select((fn, i) => (fn, i)))
-            {
-                _ = activity?.AddEvent(new("Start downloading chunk", tags: new([new("ChunkIndex", index)])));
-
-                var chunkUrl = new Uri(baseChunkUrl, chunkFileName);
-
-                var chunkResponse = await httpClient.GetAsync(chunkUrl, cancellationToken).ConfigureAwait(false);
-                if (!chunkResponse.IsSuccessStatusCode)
-                {
-                    logger.FailedToRetrieveChunkError(index, intermediateResponse.Data.ChunkInfo.NumberOfChunks, chunkResponse.StatusCode, chunkResponse.ReasonPhrase);
-                    continue;
-                }
-
-                var chunkData = await chunkResponse.Content.ReadFromJsonAsync(SubsessionChartLapArrayContext.Default.SubsessionChartLapArray, cancellationToken).ConfigureAwait(false);
-                if (chunkData is null)
-                {
-                    continue;
-                }
-
-                sessionLapsList.AddRange(chunkData);
-            }
-        }
-
-        return new DataResponse<(SubsessionLapsHeader Header, SubsessionChartLap[] Laps)>
-        {
-            Data = (intermediateResponse.Data, sessionLapsList.ToArray()),
-            DataExpires = intermediateResponse.DataExpires,
-            RateLimitRemaining = intermediateResponse.RateLimitRemaining,
-            RateLimitReset = intermediateResponse.RateLimitReset,
-            TotalRateLimit = intermediateResponse.TotalRateLimit
-        };
+        var results = await apiClient.CreateResponseFromChunksAsync(subSessionLapChartUrl,
+                                                                                true,
+                                                                                SubsessionLapsHeaderContext.Default.SubsessionLapsHeader,
+                                                                                intermediateResult => intermediateResult.ChunkInfo,
+                                                                                SubsessionChartLapArrayContext.Default.SubsessionChartLapArray,
+                                                                                cancellationToken)
+                                     .ConfigureAwait(false);
+        return results;
     }
 
     /// <inheritdoc />
-    public async Task<DataResponse<(SubsessionEventLogHeader Header, SubsessionEventLogItem[] LogItems)>> GetSubsessionEventLogAsync(int subSessionId, int simSessionNumber, CancellationToken cancellationToken = default)
+    public async Task<DataResponse<(SubsessionEventLogHeader Header, SubsessionEventLogItem[] LogItems)>> GetSubsessionEventLogAsync(int subSessionId,
+                                                                                                                                     int simSessionNumber,
+                                                                                                                                     CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("Get Subsession Event Log")
-                                           ?.AddTag("SubSessionId", subSessionId)
-                                           ?.AddTag("SimSessionNumber", simSessionNumber);
+        logger.LogDebug("Get Subsession Event Log for {SubSessionId} session {SimSessionNumber}", subSessionId, simSessionNumber);
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Get Subsession Event Log")
+                               ?.AddTag("SubSessionId", subSessionId)
+                               ?.AddTag("SimSessionNumber", simSessionNumber);
 
         var queryParameters = new Dictionary<string, object?>
         {
@@ -530,77 +546,59 @@ public class DataClient(HttpClient httpClient,
             ["simsession_number"] = simSessionNumber,
         };
 
-        var subSessionLapChartUrl = "https://members-ng.iracing.com/data/results/event_log".ToUrlWithQuery(queryParameters);
+        var subSessionLapChartUrl = new Uri(apiBaseUrl, "/data/results/event_log").WithQuery(queryParameters);
 
-        var intermediateResponse = await CreateResponseViaInfoLinkAsync(subSessionLapChartUrl,
-                                                                        SubsessionEventLogHeaderContext.Default.SubsessionEventLogHeader,
-                                                                        cancellationToken).ConfigureAwait(false);
-
-        var sessionLapsList = new List<SubsessionEventLogItem>();
-
-        _ = activity?.AddTag("NumberOfResultChunks", intermediateResponse.Data.ChunkInfo.NumberOfChunks);
-
-        if (intermediateResponse.Data.ChunkInfo.NumberOfChunks > 0)
-        {
-            var baseChunkUrl = new Uri(intermediateResponse.Data.ChunkInfo.BaseDownloadUrl);
-
-            foreach (var (chunkFileName, index) in intermediateResponse.Data.ChunkInfo.ChunkFileNames.Select((fn, i) => (fn, i)))
-            {
-                _ = activity?.AddEvent(new("Start downloading chunk", tags: new([new("ChunkIndex", index)])));
-
-                var chunkUrl = new Uri(baseChunkUrl, chunkFileName);
-
-                var chunkResponse = await httpClient.GetAsync(chunkUrl, cancellationToken).ConfigureAwait(false);
-                if (!chunkResponse.IsSuccessStatusCode)
-                {
-                    logger.FailedToRetrieveChunkError(index, intermediateResponse.Data.ChunkInfo.NumberOfChunks, chunkResponse.StatusCode, chunkResponse.ReasonPhrase);
-                    continue;
-                }
-
-                var chunkData = await chunkResponse.Content.ReadFromJsonAsync(SubsessionEventLogItemArrayContext.Default.SubsessionEventLogItemArray, cancellationToken).ConfigureAwait(false);
-                if (chunkData is null)
-                {
-                    continue;
-                }
-
-                sessionLapsList.AddRange(chunkData);
-            }
-        }
-
-        return new DataResponse<(SubsessionEventLogHeader Header, SubsessionEventLogItem[] Laps)>
-        {
-            Data = (intermediateResponse.Data, sessionLapsList.ToArray()),
-            DataExpires = intermediateResponse.DataExpires,
-            RateLimitRemaining = intermediateResponse.RateLimitRemaining,
-            RateLimitReset = intermediateResponse.RateLimitReset,
-            TotalRateLimit = intermediateResponse.TotalRateLimit
-        };
+        var results = await apiClient.CreateResponseFromChunksAsync(subSessionLapChartUrl,
+                                                                                true,
+                                                                                SubsessionEventLogHeaderContext.Default.SubsessionEventLogHeader,
+                                                                                intermediateResult => intermediateResult.ChunkInfo,
+                                                                                SubsessionEventLogItemArrayContext.Default.SubsessionEventLogItemArray,
+                                                                                cancellationToken)
+                                     .ConfigureAwait(false);
+        return results;
     }
 
     /// <inheritdoc />
     public async Task<DataResponse<SeriesDetail[]>> GetSeriesAsync(CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("Get Series");
+        logger.LogDebug("Get Series");
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Get Series");
 
-        return await CreateResponseViaInfoLinkAsync(new Uri("https://members-ng.iracing.com/data/series/get"),
-                                                    SeriesDetailArrayContext.Default.SeriesDetailArray,
-                                                    cancellationToken).ConfigureAwait(false);
+        var seriesDetailUrl = new Uri(apiBaseUrl, "/data/series/get");
+
+        var response = await apiClient.CreateResponseViaIntermediateResultAsync(seriesDetailUrl,
+                                                                                LinkResultContext.Default.LinkResult,
+                                                                                infoLinkResult => (new Uri(infoLinkResult.Link), infoLinkResult.Expires),
+                                                                                SeriesDetailArrayContext.Default.SeriesDetailArray,
+                                                                                cancellationToken)
+                                      .ConfigureAwait(false);
+
+        return response;
     }
 
     /// <inheritdoc />
     public async Task<DataResponse<IReadOnlyDictionary<string, SeriesAsset>>> GetSeriesAssetsAsync(CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("Get Series Assets");
+        logger.LogDebug("Get Series Assets");
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Get Series Assets");
 
-        return await CreateResponseViaInfoLinkAsync(new Uri("https://members-ng.iracing.com/data/series/assets"),
-                                                    SeriesAssetReadOnlyDictionaryContext.Default.IReadOnlyDictionaryStringSeriesAsset,
-                                                    cancellationToken).ConfigureAwait(false);
+        var infoLinkUri = new Uri(apiBaseUrl, "/data/series/assets");
+
+        var response = await apiClient.CreateResponseViaIntermediateResultAsync(infoLinkUri,
+                                                                                LinkResultContext.Default.LinkResult,
+                                                                                infoLinkResult => (new Uri(infoLinkResult.Link), infoLinkResult.Expires),
+                                                                                SeriesAssetReadOnlyDictionaryContext.Default.IReadOnlyDictionaryStringSeriesAsset,
+                                                                                cancellationToken)
+                                      .ConfigureAwait(false);
+
+        return response;
     }
 
     /// <inheritdoc />
     public async Task<DataResponse<(SubsessionLapsHeader Header, SubsessionLap[] Laps)>> GetSingleDriverSubsessionLapsAsync(int subSessionId, int simSessionNumber, int customerId, CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("Get Single Driver Subsession Laps")
+        logger.LogDebug("Get Single Driver Subsession Laps for {CustomerId} driving in {SubSessionId} session {SimSessionNumber}", customerId, subSessionId, simSessionNumber);
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Get Single Driver Subsession Laps")
                                            ?.AddTag("SubSessionId", subSessionId)
                                            ?.AddTag("SimSessionNumber", simSessionNumber)
                                            ?.AddTag("CustomerId", customerId);
@@ -612,57 +610,23 @@ public class DataClient(HttpClient httpClient,
             ["cust_id"] = customerId,
         };
 
-        var subSessionLapChartUrl = "https://members-ng.iracing.com/data/results/lap_data".ToUrlWithQuery(queryParameters);
+        var subSessionLapChartUrl = new Uri(apiBaseUrl, "/data/results/lap_data").WithQuery(queryParameters);
 
-        var intermediateResponse = await CreateResponseViaInfoLinkAsync(subSessionLapChartUrl,
-                                                                        SubsessionLapsHeaderContext.Default.SubsessionLapsHeader,
-                                                                        cancellationToken).ConfigureAwait(false);
-
-        var sessionLapsList = new List<SubsessionLap>();
-
-        _ = activity?.AddTag("NumberOfResultChunks", intermediateResponse.Data.ChunkInfo.NumberOfChunks);
-
-        if (intermediateResponse.Data.ChunkInfo.NumberOfChunks > 0)
-        {
-            var baseChunkUrl = new Uri(intermediateResponse.Data.ChunkInfo.BaseDownloadUrl);
-
-            foreach (var (chunkFileName, index) in intermediateResponse.Data.ChunkInfo.ChunkFileNames.Select((fn, i) => (fn, i)))
-            {
-                _ = activity?.AddEvent(new("Start downloading chunk", tags: new([new("ChunkIndex", index)])));
-
-                var chunkUrl = new Uri(baseChunkUrl, chunkFileName);
-
-                var chunkResponse = await httpClient.GetAsync(chunkUrl, cancellationToken).ConfigureAwait(false);
-                if (!chunkResponse.IsSuccessStatusCode)
-                {
-                    logger.FailedToRetrieveChunkError(index, intermediateResponse.Data.ChunkInfo.NumberOfChunks, chunkResponse.StatusCode, chunkResponse.ReasonPhrase);
-                    continue;
-                }
-
-                var chunkData = await chunkResponse.Content.ReadFromJsonAsync(SubsessionLapArrayContext.Default.SubsessionLapArray, cancellationToken).ConfigureAwait(false);
-                if (chunkData is null)
-                {
-                    continue;
-                }
-
-                sessionLapsList.AddRange(chunkData);
-            }
-        }
-
-        return new DataResponse<(SubsessionLapsHeader Header, SubsessionLap[] Laps)>
-        {
-            Data = (intermediateResponse.Data, sessionLapsList.ToArray()),
-            DataExpires = intermediateResponse.DataExpires,
-            RateLimitRemaining = intermediateResponse.RateLimitRemaining,
-            RateLimitReset = intermediateResponse.RateLimitReset,
-            TotalRateLimit = intermediateResponse.TotalRateLimit
-        };
+        var results = await apiClient.CreateResponseFromChunksAsync(subSessionLapChartUrl,
+                                                                                true,
+                                                                                SubsessionLapsHeaderContext.Default.SubsessionLapsHeader,
+                                                                                intermediateResult => intermediateResult.ChunkInfo,
+                                                                                SubsessionLapArrayContext.Default.SubsessionLapArray,
+                                                                                cancellationToken)
+                                     .ConfigureAwait(false);
+        return results;
     }
 
     /// <inheritdoc />
     public async Task<DataResponse<(SubsessionLapsHeader Header, SubsessionLap[] Laps)>> GetTeamSubsessionLapsAsync(int subSessionId, int simSessionNumber, int teamId, CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("Get Team Subsession Laps")
+        logger.LogDebug("Get Team Subsession Laps for {TeamId} driving in {SubSessionId} session {SimSessionNumber}", teamId, subSessionId, simSessionNumber);
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Get Team Subsession Laps")
                                            ?.AddTag("SubSessionId", subSessionId)
                                            ?.AddTag("SimSessionNumber", simSessionNumber)
                                            ?.AddTag("TeamId", teamId);
@@ -674,57 +638,23 @@ public class DataClient(HttpClient httpClient,
             ["team_id"] = teamId,
         };
 
-        var subSessionLapChartUrl = "https://members-ng.iracing.com/data/results/lap_data".ToUrlWithQuery(queryParameters);
+        var subSessionLapChartUrl = new Uri(apiBaseUrl, "/data/results/lap_data").WithQuery(queryParameters);
 
-        var intermediateResponse = await CreateResponseViaInfoLinkAsync(subSessionLapChartUrl,
-                                                                        SubsessionLapsHeaderContext.Default.SubsessionLapsHeader,
-                                                                        cancellationToken).ConfigureAwait(false);
-
-        var sessionLapsList = new List<SubsessionLap>();
-
-        _ = activity?.AddTag("NumberOfResultChunks", intermediateResponse.Data.ChunkInfo.NumberOfChunks);
-
-        if (intermediateResponse.Data.ChunkInfo.NumberOfChunks > 0)
-        {
-            var baseChunkUrl = new Uri(intermediateResponse.Data.ChunkInfo.BaseDownloadUrl);
-
-            foreach (var (chunkFileName, index) in intermediateResponse.Data.ChunkInfo.ChunkFileNames.Select((fn, i) => (fn, i)))
-            {
-                _ = activity?.AddEvent(new("Start downloading chunk", tags: new([new("ChunkIndex", index)])));
-
-                var chunkUrl = new Uri(baseChunkUrl, chunkFileName);
-
-                var chunkResponse = await httpClient.GetAsync(chunkUrl, cancellationToken).ConfigureAwait(false);
-                if (!chunkResponse.IsSuccessStatusCode)
-                {
-                    logger.FailedToRetrieveChunkError(index, intermediateResponse.Data.ChunkInfo.NumberOfChunks, chunkResponse.StatusCode, chunkResponse.ReasonPhrase);
-                    continue;
-                }
-
-                var chunkData = await chunkResponse.Content.ReadFromJsonAsync(SubsessionLapArrayContext.Default.SubsessionLapArray, cancellationToken).ConfigureAwait(false);
-                if (chunkData is null)
-                {
-                    continue;
-                }
-
-                sessionLapsList.AddRange(chunkData);
-            }
-        }
-
-        return new DataResponse<(SubsessionLapsHeader Header, SubsessionLap[] Laps)>
-        {
-            Data = (intermediateResponse.Data, sessionLapsList.ToArray()),
-            DataExpires = intermediateResponse.DataExpires,
-            RateLimitRemaining = intermediateResponse.RateLimitRemaining,
-            RateLimitReset = intermediateResponse.RateLimitReset,
-            TotalRateLimit = intermediateResponse.TotalRateLimit
-        };
+        var results = await apiClient.CreateResponseFromChunksAsync(subSessionLapChartUrl,
+                                                                                true,
+                                                                                SubsessionLapsHeaderContext.Default.SubsessionLapsHeader,
+                                                                                intermediateResult => intermediateResult.ChunkInfo,
+                                                                                SubsessionLapArrayContext.Default.SubsessionLapArray,
+                                                                                cancellationToken)
+                                     .ConfigureAwait(false);
+        return results;
     }
 
     /// <inheritdoc />
     public async Task<DataResponse<MemberDivision>> GetMemberDivisionAsync(int seasonId, Common.EventType eventType, CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("Get Member Division")
+        logger.LogDebug("Get Member Division for {SeasonId} in {EventType}", seasonId, eventType);
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Get Member Division")
                                            ?.AddTag("SeasonId", seasonId)
                                            ?.AddTag("EventType", eventType);
 
@@ -734,36 +664,44 @@ public class DataClient(HttpClient httpClient,
             ["event_type"] = eventType.ToString("D"),
         };
 
-        var memberDivisionUrl = "https://members-ng.iracing.com/data/stats/member_division".ToUrlWithQuery(queryParameters);
+        var memberDivisionUrl = new Uri(apiBaseUrl, "/data/stats/member_division").WithQuery(queryParameters);
 
-        return await CreateResponseViaInfoLinkAsync(memberDivisionUrl,
-                                                    MemberDivisionContext.Default.MemberDivision,
-                                                    cancellationToken).ConfigureAwait(false);
+        var response = await apiClient.CreateResponseViaIntermediateResultAsync(memberDivisionUrl,
+                                                                                LinkResultContext.Default.LinkResult,
+                                                                                infoLinkResult => (new Uri(infoLinkResult.Link), infoLinkResult.Expires),
+                                                                                MemberDivisionContext.Default.MemberDivision,
+                                                                                cancellationToken)
+                                      .ConfigureAwait(false);
+
+        return response;
     }
 
     /// <inheritdoc />
     public async Task<DataResponse<MemberYearlyStatistics>> GetMemberYearlyStatisticsAsync(CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("Get Member Yearly Statistics");
+        logger.LogDebug("Get Member Yearly Statistics");
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Get Member Yearly Statistics");
 
-        return await CreateResponseViaInfoLinkAsync(new Uri("https://members-ng.iracing.com/data/stats/member_yearly"),
-                                                    MemberYearlyStatisticsContext.Default.MemberYearlyStatistics,
-                                                    cancellationToken).ConfigureAwait(false);
-    }
+        var infoLinkUri = new Uri(apiBaseUrl, "/data/stats/member_yearly");
 
-    [Obsolete("Use \"GetMemberChartDataAsync\" instead.")]
-    public async Task<DataResponse<MemberChart>> GetMemberChartData(int? customerId, int categoryId, MemberChartType chartType, CancellationToken cancellationToken = default)
-    {
-        return await GetMemberChartDataAsync(customerId, categoryId, chartType, cancellationToken).ConfigureAwait(false);
+        var response = await apiClient.CreateResponseViaIntermediateResultAsync(infoLinkUri,
+                                                                                LinkResultContext.Default.LinkResult,
+                                                                                infoLinkResult => (new Uri(infoLinkResult.Link), infoLinkResult.Expires),
+                                                                                MemberYearlyStatisticsContext.Default.MemberYearlyStatistics,
+                                                                                cancellationToken)
+                                      .ConfigureAwait(false);
+
+        return response;
     }
 
     /// <inheritdoc />
     public async Task<DataResponse<MemberChart>> GetMemberChartDataAsync(int? customerId, int categoryId, MemberChartType chartType, CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("Get Member Chart Data")
-                                           ?.AddTag("CustomerId", customerId)
-                                           ?.AddTag("CategoryId", categoryId)
-                                           ?.AddTag("ChartType", chartType);
+        logger.LogDebug("Get Member Chart Data for {CustomerId} in {CategoryId} of type {ChartType}", customerId, categoryId, chartType);
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Get Member Chart Data")
+                                ?.AddTag("CustomerId", customerId)
+                                ?.AddTag("CategoryId", categoryId)
+                                ?.AddTag("ChartType", chartType);
 
         var parameters = new Dictionary<string, object?>
         {
@@ -772,19 +710,31 @@ public class DataClient(HttpClient httpClient,
             ["cust_id"] = customerId
         };
 
-        var memberChartUrl = "https://members-ng.iracing.com/data/member/chart_data".ToUrlWithQuery(parameters);
+        var memberChartUrl = new Uri(apiBaseUrl, "/data/member/chart_data").WithQuery(parameters);
 
-        return await CreateResponseViaInfoLinkAsync(memberChartUrl, MemberChartContext.Default.MemberChart, cancellationToken).ConfigureAwait(false);
+        var response = await apiClient.CreateResponseViaIntermediateResultAsync(memberChartUrl,
+                                                                                LinkResultContext.Default.LinkResult,
+                                                                                infoLinkResult => (new Uri(infoLinkResult.Link), infoLinkResult.Expires),
+                                                                                MemberChartContext.Default.MemberChart,
+                                                                                cancellationToken)
+                                      .ConfigureAwait(false);
+
+        return response;
     }
 
     /// <inheritdoc />
-    public async Task<DataResponse<(WorldRecordsHeader Header, WorldRecordEntry[] Entries)>> GetWorldRecordsAsync(int carId, int trackId, int? seasonYear = null, int? seasonQuarter = null, CancellationToken cancellationToken = default)
+    public async Task<DataResponse<(WorldRecordsHeader Header, WorldRecordEntry[] Entries)>> GetWorldRecordsAsync(int carId,
+                                                                                                                  int trackId,
+                                                                                                                  int? seasonYear = null,
+                                                                                                                  int? seasonQuarter = null,
+                                                                                                                  CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("Get World Records")
-                                           ?.AddTag("CarId", carId)
-                                           ?.AddTag("TrackId", trackId)
-                                           ?.AddTag("SeasonYear", seasonYear)
-                                           ?.AddTag("SeasonQuarter", seasonQuarter);
+        logger.LogDebug("Get World Records for car {CarId} on track {TrackId} season {SeasonYear} {SeasonQuarter}", carId, trackId, seasonYear, seasonQuarter);
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Get World Records")
+                               ?.AddTag("CarId", carId)
+                               ?.AddTag("TrackId", trackId)
+                               ?.AddTag("SeasonYear", seasonYear)
+                               ?.AddTag("SeasonQuarter", seasonQuarter);
 
         var queryParameters = new Dictionary<string, object?>
         {
@@ -806,68 +756,40 @@ public class DataClient(HttpClient httpClient,
             queryParameters.Add("season_quarter", seasonQuarter.Value.ToString(CultureInfo.InvariantCulture));
         }
 
-        var queryUrl = "https://members-ng.iracing.com/data/stats/world_records".ToUrlWithQuery(queryParameters);
+        var queryUrl = new Uri(apiBaseUrl, "/data/stats/world_records").WithQuery(queryParameters);
 
-        var intermediateResponse = await CreateResponseViaInfoLinkAsync(queryUrl,
-                                                                        WorldRecordsHeaderContext.Default.WorldRecordsHeader,
-                                                                        cancellationToken).ConfigureAwait(false);
-
-        var entries = new List<WorldRecordEntry>();
-
-        _ = activity?.AddTag("NumberOfResultChunks", intermediateResponse.Data.Data.ChunkInfo.NumberOfChunks);
-
-        if (intermediateResponse.Data.Data.ChunkInfo is ChunkInfo { NumberOfChunks: > 0 } chunkInfo)
-        {
-            var baseChunkUrl = new Uri(chunkInfo.BaseDownloadUrl);
-
-            foreach (var (chunkFileName, index) in chunkInfo.ChunkFileNames.Select((fn, i) => (fn, i)))
-            {
-                _ = activity?.AddEvent(new("Start downloading chunk", tags: new([new("ChunkIndex", index)])));
-
-                var chunkUrl = new Uri(baseChunkUrl, chunkFileName);
-
-                var chunkResponse = await httpClient.GetAsync(chunkUrl, cancellationToken).ConfigureAwait(false);
-                if (!chunkResponse.IsSuccessStatusCode)
-                {
-                    logger.FailedToRetrieveChunkError(index, chunkInfo.NumberOfChunks, chunkResponse.StatusCode, chunkResponse.ReasonPhrase);
-                    continue;
-                }
-
-                var chunkData = await chunkResponse.Content.ReadFromJsonAsync(WorldRecordEntryArrayContext.Default.WorldRecordEntryArray, cancellationToken).ConfigureAwait(false);
-                if (chunkData is null)
-                {
-                    continue;
-                }
-
-                entries.AddRange(chunkData);
-            }
-        }
-
-        return new DataResponse<(WorldRecordsHeader Header, WorldRecordEntry[] Entries)>
-        {
-            Data = (intermediateResponse.Data, entries.ToArray()),
-            DataExpires = intermediateResponse.DataExpires,
-            RateLimitRemaining = intermediateResponse.RateLimitRemaining,
-            RateLimitReset = intermediateResponse.RateLimitReset,
-            TotalRateLimit = intermediateResponse.TotalRateLimit
-        };
+        var result = await apiClient.CreateResponseFromChunksAsync(queryUrl,
+                                                                               true,
+                                                                               WorldRecordsHeaderContext.Default.WorldRecordsHeader,
+                                                                               header => header.Data.ChunkInfo,
+                                                                               WorldRecordEntryArrayContext.Default.WorldRecordEntryArray,
+                                                                               cancellationToken)
+                                    .ConfigureAwait(false);
+        return result;
     }
 
     /// <inheritdoc />
     public async Task<DataResponse<TeamInfo>> GetTeamAsync(int teamId, CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("Get Team")?.AddTag("TeamId", teamId);
+        logger.LogDebug("Get Team {TeamId}", teamId);
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Get Team")
+                                ?.AddTag("TeamId", teamId);
 
         var queryParameters = new Dictionary<string, object?>
         {
             ["team_id"] = teamId.ToString(CultureInfo.InvariantCulture),
         };
 
-        var queryUrl = "https://members-ng.iracing.com/data/team/get".ToUrlWithQuery(queryParameters);
+        var queryUrl = new Uri(apiBaseUrl, "/data/team/get").WithQuery(queryParameters);
 
-        return await CreateResponseViaInfoLinkAsync(queryUrl,
-                                                    TeamInfoContext.Default.TeamInfo,
-                                                    cancellationToken).ConfigureAwait(false);
+        var response = await apiClient.CreateResponseViaIntermediateResultAsync(queryUrl,
+                                                                                LinkResultContext.Default.LinkResult,
+                                                                                infoLinkResult => (new Uri(infoLinkResult.Link), infoLinkResult.Expires),
+                                                                                TeamInfoContext.Default.TeamInfo,
+                                                                                cancellationToken)
+                                      .ConfigureAwait(false);
+
+        return response;
     }
 
     /// <inheritdoc />
@@ -877,9 +799,12 @@ public class DataClient(HttpClient httpClient,
                                                                                                                                           int? division = null,
                                                                                                                                           CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("Get Season Driver Standings")
-                                           ?.AddTag("SeasonId", seasonId)
-                                           ?.AddTag("CarClassId", carClassId);
+        logger.LogDebug("Get Season Driver Standings for {SeasonId} car class {CarClassId} {RaceWeekIndex} {Division}", seasonId, carClassId, raceWeekIndex, division);
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Get Season Driver Standings")
+                               ?.AddTag("SeasonId", seasonId)
+                               ?.AddTag("CarClassId", carClassId)
+                               ?.AddTag("RaceWeekIndex", raceWeekIndex)
+                               ?.AddTag("Division", division);
 
 #if NET8_0_OR_GREATER
         ArgumentOutOfRangeException.ThrowIfNegative(seasonId);
@@ -914,51 +839,16 @@ public class DataClient(HttpClient httpClient,
             ["division"] = (division ?? -1).ToString(CultureInfo.InvariantCulture),
         };
 
-        var seasonDriverStandingsUrl = "https://members-ng.iracing.com/data/stats/season_driver_standings".ToUrlWithQuery(queryParameters);
+        var seasonDriverStandingsUrl = new Uri(apiBaseUrl, "/data/stats/season_driver_standings").WithQuery(queryParameters);
 
-        var intermediateResponse = await CreateResponseViaInfoLinkAsync(seasonDriverStandingsUrl,
-                                                                        SeasonDriverStandingsHeaderContext.Default.SeasonDriverStandingsHeader,
-                                                                        cancellationToken).ConfigureAwait(false);
-
-        var sessionLapsList = new List<SeasonDriverStanding>();
-
-        _ = activity?.AddTag("NumberOfResultChunks", intermediateResponse.Data.ChunkInfo.NumberOfChunks);
-
-        if (intermediateResponse.Data.ChunkInfo is ChunkInfo { NumberOfChunks: > 0 } chunkInfo)
-        {
-            var baseChunkUrl = new Uri(chunkInfo.BaseDownloadUrl);
-
-            foreach (var (chunkFileName, index) in chunkInfo.ChunkFileNames.Select<string, (string fn, int i)>((fn, i) => (fn, i)))
-            {
-                _ = activity?.AddEvent(new("Start downloading chunk", tags: new([new("ChunkIndex", index)])));
-
-                var chunkUrl = new Uri(baseChunkUrl, chunkFileName);
-
-                var chunkResponse = await httpClient.GetAsync(chunkUrl, cancellationToken).ConfigureAwait(false);
-                if (!chunkResponse.IsSuccessStatusCode)
-                {
-                    logger.FailedToRetrieveChunkError(index, chunkInfo.NumberOfChunks, chunkResponse.StatusCode, chunkResponse.ReasonPhrase);
-                    continue;
-                }
-
-                var chunkData = await chunkResponse.Content.ReadFromJsonAsync(SeasonDriverStandingArrayContext.Default.SeasonDriverStandingArray, cancellationToken).ConfigureAwait(false);
-                if (chunkData is null)
-                {
-                    continue;
-                }
-
-                sessionLapsList.AddRange(chunkData);
-            }
-        }
-
-        return new DataResponse<(SeasonDriverStandingsHeader Header, SeasonDriverStanding[] Laps)>
-        {
-            Data = (intermediateResponse.Data, sessionLapsList.ToArray()),
-            DataExpires = intermediateResponse.DataExpires,
-            RateLimitRemaining = intermediateResponse.RateLimitRemaining,
-            RateLimitReset = intermediateResponse.RateLimitReset,
-            TotalRateLimit = intermediateResponse.TotalRateLimit
-        };
+        var results = await apiClient.CreateResponseFromChunksAsync(seasonDriverStandingsUrl,
+                                                                                true,
+                                                                                SeasonDriverStandingsHeaderContext.Default.SeasonDriverStandingsHeader,
+                                                                                header => header.ChunkInfo,
+                                                                                SeasonDriverStandingArrayContext.Default.SeasonDriverStandingArray,
+                                                                                cancellationToken)
+                                     .ConfigureAwait(false);
+        return results;
     }
 
     /// <inheritdoc />
@@ -968,9 +858,12 @@ public class DataClient(HttpClient httpClient,
                                                                                                                                      int? division = null,
                                                                                                                                      CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("Get Season Qualify Results")
-                                           ?.AddTag("SeasonId", seasonId)
-                                           ?.AddTag("CarClassId", carClassId);
+        logger.LogDebug("Get Season Qualify Results for {SeasonId} car class {CarClassId} {RaceWeekIndex} {Division}", seasonId, carClassId, raceWeekIndex, division);
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Get Season Qualify Results")
+                               ?.AddTag("SeasonId", seasonId)
+                               ?.AddTag("CarClassId", carClassId)
+                               ?.AddTag("RaceWeekIndex", raceWeekIndex)
+                               ?.AddTag("Division", division);
 
 #if NET8_0_OR_GREATER
         ArgumentOutOfRangeException.ThrowIfNegative(seasonId);
@@ -1005,51 +898,16 @@ public class DataClient(HttpClient httpClient,
             ["division"] = (division ?? -1).ToString(CultureInfo.InvariantCulture),
         };
 
-        var qualifyResultsUrl = "https://members-ng.iracing.com/data/stats/season_qualify_results".ToUrlWithQuery(queryParameters);
+        var qualifyResultsUrl = new Uri(apiBaseUrl, "/data/stats/season_qualify_results").WithQuery(queryParameters);
 
-        var intermediateResponse = await CreateResponseViaInfoLinkAsync(qualifyResultsUrl,
-                                                                        SeasonQualifyResultsHeaderContext.Default.SeasonQualifyResultsHeader,
-                                                                        cancellationToken).ConfigureAwait(false);
-
-        var seasonQualifyResults = new List<SeasonQualifyResult>();
-
-        _ = activity?.AddTag("NumberOfResultChunks", intermediateResponse.Data.ChunkInfo.NumberOfChunks);
-
-        if (intermediateResponse.Data.ChunkInfo is ChunkInfo { NumberOfChunks: > 0 } chunkInfo)
-        {
-            var baseChunkUrl = new Uri(chunkInfo.BaseDownloadUrl);
-
-            foreach (var (chunkFileName, index) in chunkInfo.ChunkFileNames.Select<string, (string fn, int i)>((fn, i) => (fn, i)))
-            {
-                _ = activity?.AddEvent(new("Start downloading chunk", tags: new([new("ChunkIndex", index)])));
-
-                var chunkUrl = new Uri(baseChunkUrl, chunkFileName);
-
-                var chunkResponse = await httpClient.GetAsync(chunkUrl, cancellationToken).ConfigureAwait(false);
-                if (!chunkResponse.IsSuccessStatusCode)
-                {
-                    logger.FailedToRetrieveChunkError(index, chunkInfo.NumberOfChunks, chunkResponse.StatusCode, chunkResponse.ReasonPhrase);
-                    continue;
-                }
-
-                var chunkData = await chunkResponse.Content.ReadFromJsonAsync(SeasonQualifyResultArrayContext.Default.SeasonQualifyResultArray, cancellationToken).ConfigureAwait(false);
-                if (chunkData is null)
-                {
-                    continue;
-                }
-
-                seasonQualifyResults.AddRange(chunkData);
-            }
-        }
-
-        return new DataResponse<(SeasonQualifyResultsHeader Header, SeasonQualifyResult[] Standings)>
-        {
-            Data = (intermediateResponse.Data, seasonQualifyResults.ToArray()),
-            DataExpires = intermediateResponse.DataExpires,
-            RateLimitRemaining = intermediateResponse.RateLimitRemaining,
-            RateLimitReset = intermediateResponse.RateLimitReset,
-            TotalRateLimit = intermediateResponse.TotalRateLimit
-        };
+        var results = await apiClient.CreateResponseFromChunksAsync(qualifyResultsUrl,
+                                                                                true,
+                                                                                SeasonQualifyResultsHeaderContext.Default.SeasonQualifyResultsHeader,
+                                                                                header => header.ChunkInfo,
+                                                                                SeasonQualifyResultArrayContext.Default.SeasonQualifyResultArray,
+                                                                                cancellationToken)
+                                     .ConfigureAwait(false);
+        return results;
     }
 
     /// <inheritdoc />
@@ -1059,9 +917,12 @@ public class DataClient(HttpClient httpClient,
                                                                                                                                            int? division = null,
                                                                                                                                            CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("Get Season Time Trial Results")
-                                           ?.AddTag("SeasonId", seasonId)
-                                           ?.AddTag("CarClassId", carClassId);
+        logger.LogDebug("Get Season Time Trial Results for {SeasonId} car class {CarClassId} {RaceWeekIndex} {Division}", seasonId, carClassId, raceWeekIndex, division);
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Get Season Time Trial Results")
+                               ?.AddTag("SeasonId", seasonId)
+                               ?.AddTag("CarClassId", carClassId)
+                               ?.AddTag("RaceWeekIndex", raceWeekIndex)
+                               ?.AddTag("Division", division);
 
 #if NET8_0_OR_GREATER
         ArgumentOutOfRangeException.ThrowIfNegative(seasonId);
@@ -1096,51 +957,16 @@ public class DataClient(HttpClient httpClient,
             ["division"] = (division ?? -1).ToString(CultureInfo.InvariantCulture),
         };
 
-        var subSessionLapChartUrl = "https://members-ng.iracing.com/data/stats/season_tt_results".ToUrlWithQuery(queryParameters);
+        var subSessionLapChartUrl = new Uri(apiBaseUrl, "/data/stats/season_tt_results").WithQuery(queryParameters);
 
-        var intermediateResponse = await CreateResponseViaInfoLinkAsync(subSessionLapChartUrl,
-                                                                        SeasonTimeTrialResultsHeaderContext.Default.SeasonTimeTrialResultsHeader,
-                                                                        cancellationToken).ConfigureAwait(false);
-
-        var seasonTimeTrialResults = new List<SeasonTimeTrialResult>();
-
-        _ = activity?.AddTag("NumberOfResultChunks", intermediateResponse.Data.ChunkInfo.NumberOfChunks);
-
-        if (intermediateResponse.Data.ChunkInfo is ChunkInfo { NumberOfChunks: > 0 } chunkInfo)
-        {
-            var baseChunkUrl = new Uri(chunkInfo.BaseDownloadUrl);
-
-            foreach (var (chunkFileName, index) in chunkInfo.ChunkFileNames.Select<string, (string fn, int i)>((fn, i) => (fn, i)))
-            {
-                _ = activity?.AddEvent(new("Start downloading chunk", tags: new([new("ChunkIndex", index)])));
-
-                var chunkUrl = new Uri(baseChunkUrl, chunkFileName);
-
-                var chunkResponse = await httpClient.GetAsync(chunkUrl, cancellationToken).ConfigureAwait(false);
-                if (!chunkResponse.IsSuccessStatusCode)
-                {
-                    logger.FailedToRetrieveChunkError(index, chunkInfo.NumberOfChunks, chunkResponse.StatusCode, chunkResponse.ReasonPhrase);
-                    continue;
-                }
-
-                var chunkData = await chunkResponse.Content.ReadFromJsonAsync(SeasonTimeTrialResultArrayContext.Default.SeasonTimeTrialResultArray, cancellationToken).ConfigureAwait(false);
-                if (chunkData is null)
-                {
-                    continue;
-                }
-
-                seasonTimeTrialResults.AddRange(chunkData);
-            }
-        }
-
-        return new DataResponse<(SeasonTimeTrialResultsHeader Header, SeasonTimeTrialResult[] Standings)>
-        {
-            Data = (intermediateResponse.Data, seasonTimeTrialResults.ToArray()),
-            DataExpires = intermediateResponse.DataExpires,
-            RateLimitRemaining = intermediateResponse.RateLimitRemaining,
-            RateLimitReset = intermediateResponse.RateLimitReset,
-            TotalRateLimit = intermediateResponse.TotalRateLimit
-        };
+        var response = await apiClient.CreateResponseFromChunksAsync(subSessionLapChartUrl,
+                                                                                 true,
+                                                                                 SeasonTimeTrialResultsHeaderContext.Default.SeasonTimeTrialResultsHeader,
+                                                                                 header => header.ChunkInfo,
+                                                                                 SeasonTimeTrialResultArrayContext.Default.SeasonTimeTrialResultArray,
+                                                                                 cancellationToken)
+                                      .ConfigureAwait(false);
+        return response;
     }
 
     /// <inheritdoc />
@@ -1150,9 +976,12 @@ public class DataClient(HttpClient httpClient,
                                                                                                                                                    int? division = null,
                                                                                                                                                    CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("Get Season Time Trial Standings")
-                                           ?.AddTag("SeasonId", seasonId)
-                                           ?.AddTag("CarClassId", carClassId);
+        logger.LogDebug("Get Season Time Trial Standings for {SeasonId} car class {CarClassId} {RaceWeekIndex} {Division}", seasonId, carClassId, raceWeekIndex, division);
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Get Season Time Trial Standings")
+                               ?.AddTag("SeasonId", seasonId)
+                               ?.AddTag("CarClassId", carClassId)
+                               ?.AddTag("RaceWeekIndex", raceWeekIndex)
+                               ?.AddTag("Division", division);
 
 #if NET8_0_OR_GREATER
         ArgumentOutOfRangeException.ThrowIfNegative(seasonId);
@@ -1187,50 +1016,16 @@ public class DataClient(HttpClient httpClient,
             ["division"] = (division ?? -1).ToString(CultureInfo.InvariantCulture),
         };
 
-        var subSessionLapChartUrl = "https://members-ng.iracing.com/data/stats/season_tt_standings".ToUrlWithQuery(queryParameters);
+        var subSessionLapChartUrl = new Uri(apiBaseUrl, "/data/stats/season_tt_standings").WithQuery(queryParameters);
 
-        var intermediateResponse = await CreateResponseViaInfoLinkAsync(subSessionLapChartUrl,
-                                                                        SeasonTimeTrialStandingsHeaderContext.Default.SeasonTimeTrialStandingsHeader,
-                                                                        cancellationToken).ConfigureAwait(false);
-
-        var seasonTimeTrialStandings = new List<SeasonTimeTrialStanding>();
-
-        _ = activity?.AddTag("NumberOfResultChunks", intermediateResponse.Data.ChunkInfo.NumberOfChunks);
-
-        if (intermediateResponse.Data.ChunkInfo is ChunkInfo { NumberOfChunks: > 0 } chunkInfo)
-        {
-            var baseChunkUrl = new Uri(chunkInfo.BaseDownloadUrl);
-            foreach (var (chunkFileName, index) in chunkInfo.ChunkFileNames.Select((fn, i) => (fn, i)))
-            {
-                _ = activity?.AddEvent(new("Start downloading chunk", tags: new([new("ChunkIndex", index)])));
-
-                var chunkUrl = new Uri(baseChunkUrl, chunkFileName);
-
-                var chunkResponse = await httpClient.GetAsync(chunkUrl, cancellationToken).ConfigureAwait(false);
-                if (!chunkResponse.IsSuccessStatusCode)
-                {
-                    logger.FailedToRetrieveChunkError(index, chunkInfo.NumberOfChunks, chunkResponse.StatusCode, chunkResponse.ReasonPhrase);
-                    continue;
-                }
-
-                var chunkData = await chunkResponse.Content.ReadFromJsonAsync(SeasonTimeTrialStandingArrayContext.Default.SeasonTimeTrialStandingArray, cancellationToken).ConfigureAwait(false);
-                if (chunkData is null)
-                {
-                    continue;
-                }
-
-                seasonTimeTrialStandings.AddRange(chunkData);
-            }
-        }
-
-        return new DataResponse<(SeasonTimeTrialStandingsHeader Header, SeasonTimeTrialStanding[] Standings)>
-        {
-            Data = (intermediateResponse.Data, seasonTimeTrialStandings.ToArray()),
-            DataExpires = intermediateResponse.DataExpires,
-            RateLimitRemaining = intermediateResponse.RateLimitRemaining,
-            RateLimitReset = intermediateResponse.RateLimitReset,
-            TotalRateLimit = intermediateResponse.TotalRateLimit
-        };
+        var response = await apiClient.CreateResponseFromChunksAsync(subSessionLapChartUrl,
+                                                                     true,
+                                                                     SeasonTimeTrialStandingsHeaderContext.Default.SeasonTimeTrialStandingsHeader,
+                                                                     header => header.ChunkInfo,
+                                                                     SeasonTimeTrialStandingArrayContext.Default.SeasonTimeTrialStandingArray,
+                                                                     cancellationToken)
+                                      .ConfigureAwait(false);
+        return response;
     }
 
     /// <inheritdoc />
@@ -1239,9 +1034,11 @@ public class DataClient(HttpClient httpClient,
                                                                                                                                     int? raceWeekIndex = null,
                                                                                                                                     CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("Get Season Team Standings")
-                                           ?.AddTag("SeasonId", seasonId)
-                                           ?.AddTag("CarClassId", carClassId);
+        logger.LogDebug("Get Season Team Standings for {SeasonId} car class {CarClassId} {RaceWeekIndex}", seasonId, carClassId, raceWeekIndex);
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Get Season Team Standings")
+                               ?.AddTag("SeasonId", seasonId)
+                               ?.AddTag("CarClassId", carClassId)
+                               ?.AddTag("RaceWeekIndex", raceWeekIndex);
 
 #if NET8_0_OR_GREATER
         ArgumentOutOfRangeException.ThrowIfNegative(seasonId);
@@ -1270,60 +1067,26 @@ public class DataClient(HttpClient httpClient,
             ["race_week_num"] = (raceWeekIndex ?? -1).ToString(CultureInfo.InvariantCulture),
         };
 
-        var subSessionLapChartUrl = "https://members-ng.iracing.com/data/stats/season_team_standings".ToUrlWithQuery(queryParameters);
+        var subSessionLapChartUrl = new Uri(apiBaseUrl, "/data/stats/season_team_standings").WithQuery(queryParameters);
 
-        var intermediateResponse = await CreateResponseViaInfoLinkAsync(subSessionLapChartUrl,
-                                                                        SeasonTeamStandingsHeaderContext.Default.SeasonTeamStandingsHeader,
-                                                                        cancellationToken).ConfigureAwait(false);
-
-        var seasonTeamStandings = new List<SeasonTeamStanding>();
-
-        _ = activity?.AddTag("NumberOfResultChunks", intermediateResponse.Data.ChunkInfo.NumberOfChunks);
-
-        if (intermediateResponse.Data.ChunkInfo is ChunkInfo { NumberOfChunks: > 0 } chunkInfo)
-        {
-            var baseChunkUrl = new Uri(chunkInfo.BaseDownloadUrl);
-
-            foreach (var (chunkFileName, index) in chunkInfo.ChunkFileNames.Select((fn, i) => (fn, i)))
-            {
-                _ = activity?.AddEvent(new("Start downloading chunk", tags: new([new("ChunkIndex", index)])));
-
-                var chunkUrl = new Uri(baseChunkUrl, chunkFileName);
-
-                var chunkResponse = await httpClient.GetAsync(chunkUrl, cancellationToken).ConfigureAwait(false);
-                if (!chunkResponse.IsSuccessStatusCode)
-                {
-                    logger.FailedToRetrieveChunkError(index, chunkInfo.NumberOfChunks, chunkResponse.StatusCode, chunkResponse.ReasonPhrase);
-                    continue;
-                }
-
-                var chunkData = await chunkResponse.Content.ReadFromJsonAsync(SeasonTeamStandingArrayContext.Default.SeasonTeamStandingArray, cancellationToken).ConfigureAwait(false);
-                if (chunkData is null)
-                {
-                    continue;
-                }
-
-                seasonTeamStandings.AddRange(chunkData);
-            }
-        }
-
-        return new DataResponse<(SeasonTeamStandingsHeader Header, SeasonTeamStanding[] Standings)>
-        {
-            Data = (intermediateResponse.Data, seasonTeamStandings.ToArray()),
-            DataExpires = intermediateResponse.DataExpires,
-            RateLimitRemaining = intermediateResponse.RateLimitRemaining,
-            RateLimitReset = intermediateResponse.RateLimitReset,
-            TotalRateLimit = intermediateResponse.TotalRateLimit
-        };
+        var results = await apiClient.CreateResponseFromChunksAsync(subSessionLapChartUrl,
+                                                                                true,
+                                                                                SeasonTeamStandingsHeaderContext.Default.SeasonTeamStandingsHeader,
+                                                                                header => header.ChunkInfo,
+                                                                                SeasonTeamStandingArrayContext.Default.SeasonTeamStandingArray,
+                                                                                cancellationToken)
+                                     .ConfigureAwait(false);
+        return results;
     }
 
     /// <inheritdoc />
     public async Task<DataResponse<SeasonResults>> GetSeasonResultsAsync(int seasonId, Common.EventType eventType, int raceWeekNumber, CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("Get Season Results")
-                                           ?.AddTag("SeasonId", seasonId)
-                                           ?.AddTag("EventType", eventType)
-                                           ?.AddTag("RaceWeekNumber", raceWeekNumber);
+        logger.LogDebug("Get Season Results for {SeasonId} in {EventType} for week {RaceWeekNumber}", seasonId, eventType, raceWeekNumber);
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Get Season Results")
+                               ?.AddTag("SeasonId", seasonId)
+                               ?.AddTag("EventType", eventType)
+                               ?.AddTag("RaceWeekNumber", raceWeekNumber);
 
         var queryParameters = new Dictionary<string, object?>
         {
@@ -1332,46 +1095,193 @@ public class DataClient(HttpClient httpClient,
             ["race_week_num"] = raceWeekNumber,
         };
 
-        var seasonResultsUrl = "https://members-ng.iracing.com/data/results/season_results".ToUrlWithQuery(queryParameters);
+        var seasonResultsUrl = new Uri(apiBaseUrl, "/data/results/season_results").WithQuery(queryParameters);
 
-        return await CreateResponseViaInfoLinkAsync(seasonResultsUrl,
-                                                    SeasonResultsContext.Default.SeasonResults,
-                                                    cancellationToken).ConfigureAwait(false);
+        var response = await apiClient.CreateResponseViaIntermediateResultAsync(seasonResultsUrl,
+                                                                                LinkResultContext.Default.LinkResult,
+                                                                                infoLinkResult => (new Uri(infoLinkResult.Link), infoLinkResult.Expires),
+                                                                                SeasonResultsContext.Default.SeasonResults,
+                                                                                cancellationToken)
+                                      .ConfigureAwait(false);
+
+        return response;
     }
 
     /// <inheritdoc />
     public async Task<DataResponse<SeasonSeries[]>> GetSeasonsAsync(bool includeSeries, CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("Get Seasons");
+        return await GetSeasonsInternalAsync(includeSeries, null, null, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<DataResponse<SeasonSeries[]>> GetSeasonsAsync(int seasonYear, int seasonQuarter, bool includeSeries, CancellationToken cancellationToken = default)
+    {
+        return await GetSeasonsInternalAsync(includeSeries, seasonYear, seasonQuarter, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<DataResponse<SeasonSeries[]>> GetSeasonsInternalAsync(bool includeSeries,
+                                                                     int? seasonYear = null,
+                                                                     int? seasonQuarter = null,
+                                                                     CancellationToken cancellationToken = default)
+    {
+        logger.LogDebug("Get Seasons");
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Get Seasons")
+                                ?.AddTag("IncludeSeries", includeSeries);
 
         var queryParameters = new Dictionary<string, object?>
         {
             ["include_series"] = includeSeries ? "true" : "false",
         };
 
-        var seasonSeriesUrl = "https://members-ng.iracing.com/data/series/seasons".ToUrlWithQuery(queryParameters);
+        if (seasonYear != null)
+        {
+            queryParameters.Add("season_year", seasonYear);
+            activity?.AddTag("SeasonYear", seasonYear);
+        }
 
-        return await CreateResponseViaInfoLinkAsync(seasonSeriesUrl,
-                                                    SeasonSeriesArrayContext.Default.SeasonSeriesArray,
-                                                    cancellationToken).ConfigureAwait(false);
+        if (seasonQuarter != null)
+        {
+            queryParameters.Add("season_quarter", seasonQuarter);
+            activity?.AddTag("SeasonQuarter", seasonQuarter);
+        }
+
+        var seasonSeriesUrl = new Uri(apiBaseUrl, "/data/series/seasons").WithQuery(queryParameters);
+
+        var response = await apiClient.CreateResponseViaIntermediateResultAsync(seasonSeriesUrl,
+                                                                                LinkResultContext.Default.LinkResult,
+                                                                                infoLinkResult => (new Uri(infoLinkResult.Link), infoLinkResult.Expires),
+                                                                                SeasonSeriesArrayContext.Default.SeasonSeriesArray,
+                                                                                cancellationToken)
+                                      .ConfigureAwait(false);
+
+        return response;
+    }
+
+    /// <inheritdoc />
+    public async Task<DataResponse<SeasonDetail[]>> GetSeasonListAsync(bool includeSeries, CancellationToken cancellationToken = default)
+    {
+        return await GetSeasonListInternalAsync(includeSeries, null, null, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<DataResponse<SeasonDetail[]>> GetSeasonListAsync(int seasonYear, int seasonQuarter, bool includeSeries, CancellationToken cancellationToken = default)
+    {
+        return await GetSeasonListInternalAsync(includeSeries, seasonYear, seasonQuarter, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<DataResponse<SeasonDetail[]>> GetSeasonListInternalAsync(bool includeSeries,
+                                                                                int? seasonYear = null,
+                                                                                int? seasonQuarter = null,
+                                                                                CancellationToken cancellationToken = default)
+    {
+        logger.LogDebug("Get Season List");
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Get Season List")
+                                ?.AddTag("IncludeSeries", includeSeries);
+
+        var queryParameters = new Dictionary<string, object?>
+        {
+            ["include_series"] = includeSeries ? "true" : "false",
+        };
+
+        if (seasonYear != null)
+        {
+            queryParameters.Add("season_year", seasonYear);
+            activity?.AddTag("SeasonYear", seasonYear);
+        }
+
+        if (seasonQuarter != null)
+        {
+            queryParameters.Add("season_quarter", seasonQuarter);
+            activity?.AddTag("SeasonQuarter", seasonQuarter);
+        }
+
+        var seasonSeriesUrl = new Uri(apiBaseUrl, "/data/series/season_list").WithQuery(queryParameters);
+
+        var response = await apiClient.CreateResponseViaIntermediateResultAsync(seasonSeriesUrl,
+                                                                                LinkResultContext.Default.LinkResult,
+                                                                                infoLinkResult => (new Uri(infoLinkResult.Link), infoLinkResult.Expires),
+                                                                                SeasonDetailArrayWrapperContext.Default.SeasonDetailArrayWrapper,
+                                                                                detailWrapper => detailWrapper.SeasonDetails,
+                                                                                cancellationToken)
+                                      .ConfigureAwait(false);
+
+        return response;
+    }
+
+    /// <inheritdoc />
+    public async Task<DataResponse<SeasonSchedule>> GetSeasonScheduleAsync(int seasonId, CancellationToken cancellationToken = default)
+    {
+        logger.LogDebug("Get Season Schedule");
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Get Season Schedule")
+                                ?.AddTag("SeasonId", seasonId);
+
+        var queryParameters = new Dictionary<string, object?>
+        {
+            ["season_id"] = seasonId,
+        };
+
+        var seasonSeriesUrl = new Uri(apiBaseUrl, "/data/series/season_schedule").WithQuery(queryParameters);
+
+        var response = await apiClient.CreateResponseViaIntermediateResultAsync(seasonSeriesUrl,
+                                                                                LinkResultContext.Default.LinkResult,
+                                                                                infoLinkResult => (new Uri(infoLinkResult.Link), infoLinkResult.Expires),
+                                                                                SeasonScheduleContext.Default.SeasonSchedule,
+                                                                                cancellationToken)
+                                      .ConfigureAwait(false);
+
+        return response;
     }
 
     /// <inheritdoc />
     public async Task<DataResponse<StatisticsSeries[]>> GetStatisticsSeriesAsync(CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("Get Statistics Series");
+        logger.LogDebug("Get Statistics Series");
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Get Statistics Series");
 
-        return await CreateResponseViaInfoLinkAsync(new Uri("https://members-ng.iracing.com/data/series/stats_series"),
-                                                    StatisticsSeriesArrayContext.Default.StatisticsSeriesArray,
-                                                    cancellationToken).ConfigureAwait(false);
+        var statsSeriesUrl = new Uri(apiBaseUrl, "/data/series/stats_series");
+
+        var response = await apiClient.CreateResponseViaIntermediateResultAsync(statsSeriesUrl,
+                                                              LinkResultContext.Default.LinkResult,
+                                                              infoLinkResult => (new Uri(infoLinkResult.Link), infoLinkResult.Expires),
+                                                              StatisticsSeriesArrayContext.Default.StatisticsSeriesArray,
+                                                              cancellationToken).ConfigureAwait(false);
+
+        return response;
     }
 
     /// <inheritdoc />
-    public async Task<DataResponse<MemberBests>> GetBestLapStatisticsAsync(int? customerId = null, int? carId = null, CancellationToken cancellationToken = default)
+    public async Task<DataResponse<RegisteredDriversList>> GetRegisteredDriversListAsync(int subSessionId, CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("Get Best Lap Statistics")
-                                           ?.AddTag("CustomerId", customerId)
-                                           ?.AddTag("CarId", carId);
+        logger.LogDebug("Get Registered Drivers List for subesssion {SubSessionId}", subSessionId);
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Get Registered Drivers List for Subsession")
+                               ?.AddTag("SubSessionId", subSessionId);
+
+        var queryParameters = new Dictionary<string, object?>
+        {
+            ["subsession_id"] = subSessionId
+        };
+
+        var careerStatisticsUrl = new Uri(apiBaseUrl, "/data/session/reg_drivers_list").WithQuery(queryParameters);
+
+        var response = await apiClient.CreateResponseViaIntermediateResultAsync(careerStatisticsUrl,
+                                                                                LinkResultContext.Default.LinkResult,
+                                                                                infoLinkResult => (new Uri(infoLinkResult.Link), infoLinkResult.Expires),
+                                                                                RegisteredDriversListContext.Default.RegisteredDriversList,
+                                                                                cancellationToken)
+                                      .ConfigureAwait(false);
+
+        return response;
+    }
+
+    /// <inheritdoc />
+    public async Task<DataResponse<MemberBests>> GetBestLapStatisticsAsync(int? customerId = null,
+                                                                           int? carId = null,
+                                                                           CancellationToken cancellationToken = default)
+    {
+        logger.LogDebug("Get Best Lap Statistics for {CustomerId} in {CarId}", customerId, carId);
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Get Best Lap Statistics")
+                               ?.AddTag("CustomerId", customerId)
+                               ?.AddTag("CarId", carId);
 
         var queryParameters = new Dictionary<string, object?>();
 
@@ -1385,18 +1295,24 @@ public class DataClient(HttpClient httpClient,
             queryParameters.Add("car_id", carId.Value.ToString(CultureInfo.InvariantCulture));
         }
 
-        var careerStatisticsUrl = "https://members-ng.iracing.com/data/stats/member_bests".ToUrlWithQuery(queryParameters);
+        var careerStatisticsUrl = new Uri(apiBaseUrl, "/data/stats/member_bests").WithQuery(queryParameters);
 
-        return await CreateResponseViaInfoLinkAsync(careerStatisticsUrl,
-                                                    MemberBestsContext.Default.MemberBests,
-                                                    cancellationToken).ConfigureAwait(false);
+        var response = await apiClient.CreateResponseViaIntermediateResultAsync(careerStatisticsUrl,
+                                                                                LinkResultContext.Default.LinkResult,
+                                                                                infoLinkResult => (new Uri(infoLinkResult.Link), infoLinkResult.Expires),
+                                                                                MemberBestsContext.Default.MemberBests,
+                                                                                cancellationToken)
+                                      .ConfigureAwait(false);
+
+        return response;
     }
 
     /// <inheritdoc />
     public async Task<DataResponse<MemberCareer>> GetCareerStatisticsAsync(int? customerId = null, CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("Get Career Statistics")
-                                           ?.AddTag("CustomerId", customerId);
+        logger.LogDebug("Get Career Statistics for {CustomerId}", customerId);
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Get Career Statistics")
+                                ?.AddTag("CustomerId", customerId);
 
         var queryParameters = new Dictionary<string, object?>();
 
@@ -1405,18 +1321,24 @@ public class DataClient(HttpClient httpClient,
             queryParameters.Add("cust_id", customerId.Value.ToString(CultureInfo.InvariantCulture));
         }
 
-        var careerStatisticsUrl = "https://members-ng.iracing.com/data/stats/member_career".ToUrlWithQuery(queryParameters);
+        var careerStatisticsUrl = new Uri(apiBaseUrl, "/data/stats/member_career").WithQuery(queryParameters);
 
-        return await CreateResponseViaInfoLinkAsync(careerStatisticsUrl,
-                                                    MemberCareerContext.Default.MemberCareer,
-                                                    cancellationToken).ConfigureAwait(false);
+        var response = await apiClient.CreateResponseViaIntermediateResultAsync(careerStatisticsUrl,
+                                                                                LinkResultContext.Default.LinkResult,
+                                                                                infoLinkResult => (new Uri(infoLinkResult.Link), infoLinkResult.Expires),
+                                                                                MemberCareerContext.Default.MemberCareer,
+                                                                                cancellationToken)
+                                      .ConfigureAwait(false);
+
+        return response;
     }
 
     /// <inheritdoc />
     public async Task<DataResponse<MemberRecentRaces>> GetMemberRecentRacesAsync(int? customerId = null, CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("Get Member Recent Races")
-                                           ?.AddTag("CustomerId", customerId);
+        logger.LogDebug("Get Member Recent Races for {CustomerId}", customerId);
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Get Member Recent Races")
+                                ?.AddTag("CustomerId", customerId);
 
         var queryParameters = new Dictionary<string, object?>();
 
@@ -1425,18 +1347,24 @@ public class DataClient(HttpClient httpClient,
             queryParameters.Add("cust_id", customerId.Value.ToString(CultureInfo.InvariantCulture));
         }
 
-        var memberRecentRacesUrl = "https://members-ng.iracing.com/data/stats/member_recent_races".ToUrlWithQuery(queryParameters);
+        var memberRecentRacesUrl = new Uri(apiBaseUrl, "/data/stats/member_recent_races").WithQuery(queryParameters);
 
-        return await CreateResponseViaInfoLinkAsync(memberRecentRacesUrl,
-                                                    MemberRecentRacesContext.Default.MemberRecentRaces,
-                                                    cancellationToken).ConfigureAwait(false);
+        var response = await apiClient.CreateResponseViaIntermediateResultAsync(memberRecentRacesUrl,
+                                                                                LinkResultContext.Default.LinkResult,
+                                                                                infoLinkResult => (new Uri(infoLinkResult.Link), infoLinkResult.Expires),
+                                                                                MemberRecentRacesContext.Default.MemberRecentRaces,
+                                                                                cancellationToken)
+                                      .ConfigureAwait(false);
+
+        return response;
     }
 
     /// <inheritdoc />
     public async Task<DataResponse<MemberSummary>> GetMemberSummaryAsync(int? customerId = null, CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("Get Member Summary")
-                                           ?.AddTag("CustomerId", customerId);
+        logger.LogDebug("Get Member Summary for {CustomerId}", customerId);
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Get Member Summary")
+                                ?.AddTag("CustomerId", customerId);
 
         var queryParameters = new Dictionary<string, object?>();
 
@@ -1445,37 +1373,59 @@ public class DataClient(HttpClient httpClient,
             queryParameters.Add("cust_id", customerId.Value.ToString(CultureInfo.InvariantCulture));
         }
 
-        var memberSummaryUrl = "https://members-ng.iracing.com/data/stats/member_summary".ToUrlWithQuery(queryParameters);
+        var memberSummaryUrl = new Uri(apiBaseUrl, "/data/stats/member_summary").WithQuery(queryParameters);
 
-        return await CreateResponseViaInfoLinkAsync(memberSummaryUrl,
-                                                    MemberSummaryContext.Default.MemberSummary,
-                                                    cancellationToken).ConfigureAwait(false);
+        var response = await apiClient.CreateResponseViaIntermediateResultAsync(memberSummaryUrl,
+                                                                                LinkResultContext.Default.LinkResult,
+                                                                                infoLinkResult => (new Uri(infoLinkResult.Link), infoLinkResult.Expires),
+                                                                                MemberSummaryContext.Default.MemberSummary,
+                                                                                cancellationToken)
+                                      .ConfigureAwait(false);
+
+        return response;
     }
 
     /// <inheritdoc />
     public async Task<DataResponse<IReadOnlyDictionary<string, TrackAssets>>> GetTrackAssetsAsync(CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("Get Track Assets");
+        logger.LogDebug("Get Track Assets");
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Get Track Assets");
 
-        return await CreateResponseViaInfoLinkAsync(new Uri("https://members-ng.iracing.com/data/track/assets"),
-                                                    TrackAssetsArrayContext.Default.IReadOnlyDictionaryStringTrackAssets,
-                                                    cancellationToken).ConfigureAwait(false);
+        var trackAssetsUrl = new Uri(apiBaseUrl, "/data/track/assets");
+
+        var response = await apiClient.CreateResponseViaIntermediateResultAsync(trackAssetsUrl,
+                                                                                LinkResultContext.Default.LinkResult,
+                                                                                infoLinkResult => (new Uri(infoLinkResult.Link), infoLinkResult.Expires),
+                                                                                TrackAssetsArrayContext.Default.IReadOnlyDictionaryStringTrackAssets,
+                                                                                cancellationToken)
+                                      .ConfigureAwait(false);
+
+        return response;
     }
 
     /// <inheritdoc />
     public async Task<DataResponse<Tracks.Track[]>> GetTracksAsync(CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("Get Tracks");
+        logger.LogDebug("Get Tracks");
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Get Tracks");
 
-        return await CreateResponseViaInfoLinkAsync(new Uri("https://members-ng.iracing.com/data/track/get"),
-                                                    TrackArrayContext.Default.TrackArray,
-                                                    cancellationToken).ConfigureAwait(false);
+        var infoLinkUri = new Uri(apiBaseUrl, "/data/track/get");
+
+        var response = await apiClient.CreateResponseViaIntermediateResultAsync(infoLinkUri,
+                                                                                LinkResultContext.Default.LinkResult,
+                                                                                infoLinkResult => (new Uri(infoLinkResult.Link), infoLinkResult.Expires),
+                                                                                TrackArrayContext.Default.TrackArray,
+                                                                                cancellationToken)
+                                      .ConfigureAwait(false);
+
+        return response;
     }
 
     /// <inheritdoc />
     public async Task<DataResponse<(HostedResultsHeader Header, HostedResultItem[] Items)>> SearchHostedResultsAsync(HostedSearchParameters searchParameters, CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("Search Hosted Results");
+        logger.LogDebug("Search Hosted Results");
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Search Hosted Results");
 
 #if NET6_0_OR_GREATER
         ArgumentNullException.ThrowIfNull(searchParameters);
@@ -1496,12 +1446,20 @@ public class DataClient(HttpClient httpClient,
             throw new ArgumentException("Must supply one of \"ParticipantCustomerId\", \"HostCustomerId\", \"TeamId\", or \"SessionName\"", nameof(searchParameters));
         }
 
-        if (ValidateSearchDateRange(searchParameters.StartRangeBegin, searchParameters.StartRangeEnd, nameof(searchParameters), nameof(searchParameters.StartRangeBegin), nameof(searchParameters.StartRangeEnd)) is Exception startRangeEx)
+        if (ValidateSearchDateRange(searchParameters.StartRangeBegin,
+                                    searchParameters.StartRangeEnd,
+                                    nameof(searchParameters),
+                                    nameof(searchParameters.StartRangeBegin),
+                                    nameof(searchParameters.StartRangeEnd)) is Exception startRangeEx)
         {
             throw startRangeEx;
         }
 
-        if (ValidateSearchDateRange(searchParameters.FinishRangeBegin, searchParameters.FinishRangeEnd, nameof(searchParameters), nameof(searchParameters.FinishRangeBegin), nameof(searchParameters.FinishRangeEnd)) is Exception finishRangeEx)
+        if (ValidateSearchDateRange(searchParameters.FinishRangeBegin,
+                                    searchParameters.FinishRangeEnd,
+                                    nameof(searchParameters),
+                                    nameof(searchParameters.FinishRangeBegin),
+                                    nameof(searchParameters.FinishRangeEnd)) is Exception finishRangeEx)
         {
             throw finishRangeEx;
         }
@@ -1521,15 +1479,22 @@ public class DataClient(HttpClient httpClient,
         queryParameters.AddParameterIfNotNull(() => searchParameters.TrackId);
         queryParameters.AddParameterIfNotNull(() => searchParameters.CategoryIds);
 
-        var searchHostedUrl = "https://members-ng.iracing.com/data/results/search_hosted".ToUrlWithQuery(queryParameters);
+        var searchHostedUrl = new Uri(apiBaseUrl, "/data/results/search_hosted").WithQuery(queryParameters);
 
-        return await CreateResponseFromChunkedDataAsync<HostedResultsHeader, HostedResultsHeaderData, HostedResultItem>(searchHostedUrl, HostedResultsHeaderContext.Default.HostedResultsHeader, HostedResultItemContext.Default.HostedResultItemArray, cancellationToken).ConfigureAwait(false);
+        return await apiClient.CreateResponseFromChunksAsync(searchHostedUrl,
+                                                             false,
+                                                             HostedResultsHeaderContext.Default.HostedResultsHeader,
+                                                             header => header.Data.ChunkInfo,
+                                                             HostedResultItemContext.Default.HostedResultItemArray,
+                                                             cancellationToken)
+                              .ConfigureAwait(false);
     }
 
     /// <inheritdoc />
     public async Task<DataResponse<(OfficialSearchResultHeader Header, OfficialSearchResultItem[] Items)>> SearchOfficialResultsAsync(OfficialSearchParameters searchParameters, CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("Search Official Results");
+        logger.LogDebug("Search Official Results");
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Search Official Results");
 
 #if NET6_0_OR_GREATER
         ArgumentNullException.ThrowIfNull(searchParameters);
@@ -1581,18 +1546,22 @@ public class DataClient(HttpClient httpClient,
         queryParameters.AddParameterIfNotNull(() => searchParameters.OfficialOnly);
         queryParameters.AddParameterIfNotNull(() => searchParameters.EventTypes);
 
-        var searchHostedUrl = "https://members-ng.iracing.com/data/results/search_series".ToUrlWithQuery(queryParameters);
+        var searchHostedUrl = new Uri(apiBaseUrl, "/data/results/search_series").WithQuery(queryParameters);
 
-        return await CreateResponseFromChunkedDataAsync<OfficialSearchResultHeader, OfficialSearchResultHeaderData, OfficialSearchResultItem>(searchHostedUrl,
-                                                                                                                                              OfficialSearchResultHeaderContext.Default.OfficialSearchResultHeader,
-                                                                                                                                              OfficialSearchResultItemArrayContext.Default.OfficialSearchResultItemArray,
-                                                                                                                                              cancellationToken).ConfigureAwait(false);
+        return await apiClient.CreateResponseFromChunksAsync(searchHostedUrl,
+                                                                  false,
+                                                                  OfficialSearchResultHeaderContext.Default.OfficialSearchResultHeader,
+                                                                  header => header.Data.ChunkInfo,
+                                                                  OfficialSearchResultItemArrayContext.Default.OfficialSearchResultItemArray,
+                                                                  cancellationToken)
+                              .ConfigureAwait(false);
     }
 
     /// <inheritdoc />
     public async Task<DataResponse<LeagueDirectoryResultPage>> SearchLeagueDirectoryAsync(SearchLeagueDirectoryParameters searchParameters, CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("Search League Directory");
+        logger.LogDebug("Search League Directory");
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Search League Directory");
 
 #if NET6_0_OR_GREATER
         ArgumentNullException.ThrowIfNull(searchParameters);
@@ -1651,19 +1620,25 @@ public class DataClient(HttpClient httpClient,
             }
         }
 
-        var searchLeagueDirectoryUrl = "https://members-ng.iracing.com/data/league/directory".ToUrlWithQuery(queryParameters);
+        var searchLeagueDirectoryUrl = new Uri(apiBaseUrl, "/data/league/directory").WithQuery(queryParameters);
 
-        return await CreateResponseViaInfoLinkAsync(searchLeagueDirectoryUrl,
-                                                    LeagueDirectoryResultPageContext.Default.LeagueDirectoryResultPage,
-                                                    cancellationToken).ConfigureAwait(false);
+        var response = await apiClient.CreateResponseViaIntermediateResultAsync(searchLeagueDirectoryUrl,
+                                                                                LinkResultContext.Default.LinkResult,
+                                                                                infoLinkResult => (new Uri(infoLinkResult.Link), infoLinkResult.Expires),
+                                                                                LeagueDirectoryResultPageContext.Default.LeagueDirectoryResultPage,
+                                                                                cancellationToken)
+                                      .ConfigureAwait(false);
+
+        return response;
     }
 
     /// <inheritdoc />
     public async Task<DataResponse<ListOfSeasons>> ListSeasonsAsync(int seasonYear, int seasonQuarter, CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("List Seasons")
-                                           ?.AddTag("SeasonYear", seasonYear)
-                                           ?.AddTag("SeasonQuarter", seasonQuarter);
+        logger.LogDebug("List Seasons for {SeasonYear} {SeasonQuarter}", seasonYear, seasonQuarter);
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("List Seasons")
+                               ?.AddTag("SeasonYear", seasonYear)
+                               ?.AddTag("SeasonQuarter", seasonQuarter);
 
         var queryParameters = new Dictionary<string, object?>
         {
@@ -1671,24 +1646,33 @@ public class DataClient(HttpClient httpClient,
             ["season_quarter"] = seasonQuarter.ToString(CultureInfo.InvariantCulture),
         };
 
-        var memberSummaryUrl = "https://members-ng.iracing.com/data/season/list".ToUrlWithQuery(queryParameters);
+        var memberSummaryUrl = new Uri(apiBaseUrl, "/data/season/list").WithQuery(queryParameters);
 
-        return await CreateResponseViaInfoLinkAsync(memberSummaryUrl,
-                                                    ListOfSeasonsContext.Default.ListOfSeasons,
-                                                    cancellationToken).ConfigureAwait(false);
+        var response = await apiClient.CreateResponseViaIntermediateResultAsync(memberSummaryUrl,
+                                                                                LinkResultContext.Default.LinkResult,
+                                                                                infoLinkResult => (new Uri(infoLinkResult.Link), infoLinkResult.Expires),
+                                                                                ListOfSeasonsContext.Default.ListOfSeasons,
+                                                                                cancellationToken)
+                                      .ConfigureAwait(false);
+
+        return response;
     }
 
-    private Exception? ValidateSearchDateRange(DateTime? rangeBegin, DateTime? rangeEnd, string parameterName, string rangeBeginFieldName, string rangeEndFieldName)
+    private Exception? ValidateSearchDateRange(DateTime? rangeBegin,
+                                               DateTime? rangeEnd,
+                                               string parameterName,
+                                               string rangeBeginFieldName,
+                                               string rangeEndFieldName)
     {
         if (rangeBegin is not null)
         {
-            if (rangeBegin.Value > GetDateTimeUtcNow())
+            if (rangeBegin.Value > timeProvider.GetUtcNow())
             {
                 return new ArgumentOutOfRangeException(parameterName, $"Value for \"{rangeBeginFieldName}\" cannot be in the future.");
             }
 
             if (rangeEnd is null
-                && (Math.Abs(GetDateTimeUtcNow().Subtract(rangeBegin.Value).TotalDays) > 90))
+                && (Math.Abs(timeProvider.GetUtcNow().Subtract(rangeBegin.Value).TotalDays) > 90))
             {
                 return new ArgumentOutOfRangeException(parameterName, $"Must supply value for \"{rangeEndFieldName}\" if \"{rangeBeginFieldName}\" is more than 90 days in the past.");
             }
@@ -1717,15 +1701,11 @@ public class DataClient(HttpClient httpClient,
         return null;
     }
 
-    private DateTime GetDateTimeUtcNow()
-    {
-        return options.CurrentDateTimeSource is null ? DateTime.UtcNow : options.CurrentDateTimeSource().UtcDateTime;
-    }
-
     /// <inheritdoc />
     public async Task<DataResponse<LeagueMembership[]>> GetLeagueMembershipAsync(bool includeLeague = false, CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("Get League Membership");
+        logger.LogDebug("Get League Membership");
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Get League Membership");
 
         return await GetLeagueMembershipInternalAsync(null, includeLeague, cancellationToken).ConfigureAwait(false);
     }
@@ -1733,7 +1713,8 @@ public class DataClient(HttpClient httpClient,
     /// <inheritdoc />
     public async Task<DataResponse<LeagueMembership[]>> GetLeagueMembershipAsync(int customerId, bool includeLeague = false, CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("Get League Membership")
+        logger.LogDebug("Get League Membership for {CustomerId}", customerId);
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Get League Membership")
                                            ?.AddTag("CustomerId", customerId);
 
         return await GetLeagueMembershipInternalAsync(customerId, includeLeague, cancellationToken).ConfigureAwait(false);
@@ -1751,17 +1732,23 @@ public class DataClient(HttpClient httpClient,
             queryParameters.Add("cust_id", customerId.Value.ToString(CultureInfo.InvariantCulture));
         }
 
-        var getMembershipUrl = "https://members-ng.iracing.com/data/league/membership".ToUrlWithQuery(queryParameters);
+        var getMembershipUrl = new Uri(apiBaseUrl, "/data/league/membership").WithQuery(queryParameters);
 
-        return await CreateResponseViaInfoLinkAsync(getMembershipUrl,
-                                                    LeagueMembershipArrayContext.Default.LeagueMembershipArray,
-                                                    cancellationToken).ConfigureAwait(false);
+        var response = await apiClient.CreateResponseViaIntermediateResultAsync(getMembershipUrl,
+                                                                                LinkResultContext.Default.LinkResult,
+                                                                                infoLinkResult => (new Uri(infoLinkResult.Link), infoLinkResult.Expires),
+                                                                                LeagueMembershipArrayContext.Default.LeagueMembershipArray,
+                                                                                cancellationToken)
+                                      .ConfigureAwait(false);
+
+        return response;
     }
 
     /// <inheritdoc />
     public async Task<DataResponse<LeagueSeasons>> GetLeagueSeasonsAsync(int leagueId, bool includeRetired = false, CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("Get League Seasons")
+        logger.LogDebug("Get League Seasons for {LeagueId}", leagueId);
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Get League Seasons")
                                            ?.AddTag("LeagueId", leagueId);
 
         var queryParameters = new Dictionary<string, object?>
@@ -1770,17 +1757,23 @@ public class DataClient(HttpClient httpClient,
             ["retired"] = includeRetired ? "1" : "0"
         };
 
-        var getLeagueSeasons = "https://members-ng.iracing.com/data/league/seasons".ToUrlWithQuery(queryParameters);
+        var getLeagueSeasons = new Uri(apiBaseUrl, "/data/league/seasons").WithQuery(queryParameters);
 
-        return await CreateResponseViaInfoLinkAsync(getLeagueSeasons,
-                                                    LeagueSeasonsContext.Default.LeagueSeasons,
-                                                    cancellationToken).ConfigureAwait(false);
+        var response = await apiClient.CreateResponseViaIntermediateResultAsync(getLeagueSeasons,
+                                                                                LinkResultContext.Default.LinkResult,
+                                                                                infoLinkResult => (new Uri(infoLinkResult.Link), infoLinkResult.Expires),
+                                                                                LeagueSeasonsContext.Default.LeagueSeasons,
+                                                                                cancellationToken)
+                                      .ConfigureAwait(false);
+
+        return response;
     }
 
     /// <inheritdoc />
     public async Task<DataResponse<RaceGuideResults>> GetRaceGuideAsync(DateTimeOffset? from = null, bool? includeEndAfterFrom = null, CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("Get Race Guide");
+        logger.LogDebug("Get Race Guide");
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Get Race Guide");
 
         var queryParameters = new Dictionary<string, object?>();
 
@@ -1797,37 +1790,62 @@ public class DataClient(HttpClient httpClient,
 #pragma warning restore CA1308 // Normalize strings to uppercase
         }
 
-        var raceGuideUrl = "https://members-ng.iracing.com/data/season/race_guide".ToUrlWithQuery(queryParameters);
+        var raceGuideUrl = new Uri(apiBaseUrl, "/data/season/race_guide").WithQuery(queryParameters);
 
-        return await CreateResponseViaInfoLinkAsync(raceGuideUrl,
-                                                    RaceGuideResultsContext.Default.RaceGuideResults,
-                                                    cancellationToken).ConfigureAwait(false);
+        var response = await apiClient.CreateResponseViaIntermediateResultAsync(raceGuideUrl,
+                                                                                LinkResultContext.Default.LinkResult,
+                                                                                infoLinkResult => (new Uri(infoLinkResult.Link), infoLinkResult.Expires),
+                                                                                RaceGuideResultsContext.Default.RaceGuideResults,
+                                                                                cancellationToken)
+                                      .ConfigureAwait(false);
+
+        return response;
     }
 
     /// <inheritdoc />
     public async Task<DataResponse<Country[]>> GetCountriesAsync(CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("Get Countries");
+        logger.LogDebug("Get Countries");
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Get Countries");
 
-        return await CreateResponseViaInfoLinkAsync(new Uri("https://members-ng.iracing.com/data/lookup/countries"),
-                                                    CountryArrayContext.Default.CountryArray,
-                                                    cancellationToken).ConfigureAwait(false);
+        var infoLinkUri = new Uri(apiBaseUrl, "/data/lookup/countries");
+
+        var response = await apiClient.CreateResponseViaIntermediateResultAsync(infoLinkUri,
+                                                                                LinkResultContext.Default.LinkResult,
+                                                                                infoLinkResult => (new Uri(infoLinkResult.Link), infoLinkResult.Expires),
+                                                                                CountryArrayContext.Default.CountryArray,
+                                                                                cancellationToken)
+                                      .ConfigureAwait(false);
+
+        return response;
     }
 
     /// <inheritdoc />
     public async Task<DataResponse<ParticipationCredits[]>> GetMemberParticipationCreditsAsync(CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("Get Member Participation Credits");
+        logger.LogDebug("Get Member Participation Credits");
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Get Member Participation Credits");
 
-        return await CreateResponseViaInfoLinkAsync(new Uri("https://members-ng.iracing.com/data/member/participation_credits"),
-                                                    ParticipationCreditsArrayContext.Default.ParticipationCreditsArray,
-                                                    cancellationToken).ConfigureAwait(false);
+        var infoLinkUri = new Uri(apiBaseUrl, "/data/member/participation_credits");
+
+        var response = await apiClient.CreateResponseViaIntermediateResultAsync(infoLinkUri,
+                                                                                LinkResultContext.Default.LinkResult,
+                                                                                infoLinkResult => (new Uri(infoLinkResult.Link), infoLinkResult.Expires),
+                                                                                ParticipationCreditsArrayContext.Default.ParticipationCreditsArray,
+                                                                                cancellationToken)
+                                      .ConfigureAwait(false);
+
+        return response;
     }
 
     /// <inheritdoc />
-    public async Task<DataResponse<LeagueSeasonSessions>> GetLeagueSeasonSessionsAsync(int leagueId, int seasonId, bool resultsOnly = false, CancellationToken cancellationToken = default)
+    public async Task<DataResponse<LeagueSeasonSessions>> GetLeagueSeasonSessionsAsync(int leagueId,
+                                                                                       int seasonId,
+                                                                                       bool resultsOnly = false,
+                                                                                       CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("Get League Season Sessions")
+        logger.LogDebug("Get League Season Sessions for {LeagueId} {SeasonId}", leagueId, seasonId);
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Get League Season Sessions")
                                            ?.AddTag("LeagueId", leagueId)
                                            ?.AddTag("SeasonId", seasonId);
 
@@ -1838,17 +1856,23 @@ public class DataClient(HttpClient httpClient,
             ["results_only"] = resultsOnly ? "1" : "0"
         };
 
-        var getLeagueSeasonSessions = "https://members-ng.iracing.com/data/league/season_sessions".ToUrlWithQuery(queryParameters);
+        var getLeagueSeasonSessions = new Uri(apiBaseUrl, "/data/league/season_sessions").WithQuery(queryParameters);
 
-        return await CreateResponseViaInfoLinkAsync(getLeagueSeasonSessions,
-                                                    LeagueSeasonSessionsContext.Default.LeagueSeasonSessions,
-                                                    cancellationToken).ConfigureAwait(false);
+        var response = await apiClient.CreateResponseViaIntermediateResultAsync(getLeagueSeasonSessions,
+                                                                                LinkResultContext.Default.LinkResult,
+                                                                                infoLinkResult => (new Uri(infoLinkResult.Link), infoLinkResult.Expires),
+                                                                                LeagueSeasonSessionsContext.Default.LeagueSeasonSessions,
+                                                                                cancellationToken)
+                                      .ConfigureAwait(false);
+
+        return response;
     }
 
     /// <inheritdoc />
     public async Task<DataResponse<PastSeriesDetail>> GetPastSeasonsForSeriesAsync(int seriesId, CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("Get Past Seasons For Series")
+        logger.LogDebug("Get Past Seasons For Series {SeriesId}", seriesId);
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Get Past Seasons For Series")
                                            ?.AddTag("SeriesId", seriesId);
 
         var queryParameters = new Dictionary<string, object?>
@@ -1856,11 +1880,14 @@ public class DataClient(HttpClient httpClient,
             ["series_id"] = seriesId.ToString(CultureInfo.InvariantCulture),
         };
 
-        var getPastSeasonsForSeriesUrl = "https://members-ng.iracing.com/data/series/past_seasons".ToUrlWithQuery(queryParameters);
+        var getPastSeasonsForSeriesUrl = new Uri(apiBaseUrl, "/data/series/past_seasons").WithQuery(queryParameters);
 
-        var intermediateResponse = await CreateResponseViaInfoLinkAsync(getPastSeasonsForSeriesUrl,
-                                                                        PastSeriesResultContext.Default.PastSeriesResult,
-                                                                        cancellationToken).ConfigureAwait(false);
+        var intermediateResponse = await apiClient.CreateResponseViaIntermediateResultAsync(getPastSeasonsForSeriesUrl,
+                                                                                            LinkResultContext.Default.LinkResult,
+                                                                                            infoLinkResult => (new Uri(infoLinkResult.Link), infoLinkResult.Expires),
+                                                                                            PastSeriesResultContext.Default.PastSeriesResult,
+                                                                                            cancellationToken)
+                                                  .ConfigureAwait(false);
 
         return new DataResponse<PastSeriesDetail>
         {
@@ -1873,9 +1900,14 @@ public class DataClient(HttpClient httpClient,
     }
 
     /// <inheritdoc />
-    public async Task<DataResponse<SeasonStandings>> GetSeasonStandingsAsync(int leagueId, int seasonId, int? carClassId = null, int? carId = null, CancellationToken cancellationToken = default)
+    public async Task<DataResponse<SeasonStandings>> GetSeasonStandingsAsync(int leagueId,
+                                                                             int seasonId,
+                                                                             int? carClassId = null,
+                                                                             int? carId = null,
+                                                                             CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("Get League Season Standings")
+        logger.LogDebug("Get League Season Standings for {LeagueId} {SeasonId}", leagueId, seasonId);
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Get League Season Standings")
                                            ?.AddTag("LeagueId", leagueId)
                                            ?.AddTag("SeasonId", seasonId);
 
@@ -1895,11 +1927,16 @@ public class DataClient(HttpClient httpClient,
             queryParameters.Add("car_id", carId.Value.ToString(CultureInfo.InvariantCulture));
         }
 
-        var queryUrl = "https://members-ng.iracing.com/data/league/season_standings".ToUrlWithQuery(queryParameters);
+        var queryUrl = new Uri(apiBaseUrl, "/data/league/season_standings").WithQuery(queryParameters);
 
-        return await CreateResponseViaInfoLinkAsync(queryUrl,
-                                                    SeasonStandingsContext.Default.SeasonStandings,
-                                                    cancellationToken).ConfigureAwait(false);
+        var response = await apiClient.CreateResponseViaIntermediateResultAsync(queryUrl,
+                                                                                LinkResultContext.Default.LinkResult,
+                                                                                infoLinkResult => (new Uri(infoLinkResult.Link), infoLinkResult.Expires),
+                                                                                SeasonStandingsContext.Default.SeasonStandings,
+                                                                                cancellationToken)
+                                      .ConfigureAwait(false);
+
+        return response;
     }
 
     /// <inheritdoc />
@@ -1909,9 +1946,10 @@ public class DataClient(HttpClient httpClient,
                                                                                                                                                           int? raceWeekIndex = null,
                                                                                                                                                           CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("Get Season Super Session Standings")
-                                           ?.AddTag("SeasonId", seasonId)
-                                           ?.AddTag("CarClassId", carClassId);
+        logger.LogDebug("Get Season Super Session Standings for {SeasonId} {CarClassId}", seasonId, carClassId);
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Get Season Super Session Standings")
+                               ?.AddTag("SeasonId", seasonId)
+                               ?.AddTag("CarClassId", carClassId);
 
         var queryParameters = new Dictionary<string, object?>
         {
@@ -1929,75 +1967,90 @@ public class DataClient(HttpClient httpClient,
             queryParameters.Add("race_week_num", raceWeekIndex.Value.ToString(CultureInfo.InvariantCulture));
         }
 
-        var queryUrl = "https://members-ng.iracing.com/data/stats/season_supersession_standings".ToUrlWithQuery(queryParameters);
+        var queryUrl = new Uri(apiBaseUrl, "/data/stats/season_supersession_standings").WithQuery(queryParameters);
 
-        return await CreateResponseViaInfoLinkToChunkInfoAsync(queryUrl,
-                                                               SeasonSuperSessionResultsHeaderContext.Default.SeasonSuperSessionResultsHeader,
-                                                               SeasonSuperSessionResultItemArrayContext.Default.SeasonSuperSessionResultItemArray,
-                                                               cancellationToken).ConfigureAwait(false);
+        return await apiClient.CreateResponseFromChunksAsync(queryUrl,
+                                                                         true,
+                                                                         SeasonSuperSessionResultsHeaderContext.Default.SeasonSuperSessionResultsHeader,
+                                                                         header => header.ChunkInfo,
+                                                                         SeasonSuperSessionResultItemArrayContext.Default.SeasonSuperSessionResultItemArray,
+                                                                         cancellationToken)
+                              .ConfigureAwait(false);
     }
 
     /// <inheritdoc />
     public async Task<StatusResult> GetServiceStatusAsync(CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("Get Service Status");
+        logger.LogDebug("Get Service Status");
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Get Service Status");
 
-        var data = (await httpClient.GetFromJsonAsync("https://status.iracing.com/status.json",
-                                                     StatusResultContext.Default.StatusResult,
-                                                     cancellationToken: cancellationToken)
-                                   .ConfigureAwait(false))
-                    ?? throw new iRacingDataClientException("Data not found.");
+        var data = await apiClient.GetUnauthenticatedResponseAsync(new Uri("https://status.iracing.com/status.json"),
+                                                                   StatusResultContext.Default.StatusResult,
+                                                                   cancellationToken)
+                                  .ConfigureAwait(false)
+                   ?? throw new iRacingDataClientException("Data not found.");
 
-        return data!;
+        return data;
     }
 
     /// <inheritdoc />
     public async Task<TimeAttackSeason[]> GetTimeAttackSeasonsAsync(CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("Get Time Attack Seasons");
+        logger.LogDebug("Get Time Attack Seasons");
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Get Time Attack Seasons");
 
         // A "magic" sequence of URLs from Nicholas Bailey: https://forums.iracing.com/discussion/comment/302454/#Comment_302454
 
-        var indexData = (await httpClient.GetFromJsonAsync("https://dqfp1ltauszrc.cloudfront.net/public/time-attack/schedules/time_attack_schedule_index.json",
-                                                           TimeAttackScheduleIndexContext.Default.TimeAttackScheduleIndex,
-                                                           cancellationToken: cancellationToken)
-                                   .ConfigureAwait(false))
-                         ?? throw new iRacingDataClientException("Data not found.");
+        var indexData = await apiClient.GetUnauthenticatedResponseAsync(new Uri("https://dqfp1ltauszrc.cloudfront.net/public/time-attack/schedules/time_attack_schedule_index.json"),
+                                                                        TimeAttackScheduleIndexContext.Default.TimeAttackScheduleIndex,
+                                                                        cancellationToken: cancellationToken)
+                                       .ConfigureAwait(false)
+                        ?? throw new iRacingDataClientException("Data not found.");
 
-        var data = (await httpClient.GetFromJsonAsync($"https://dqfp1ltauszrc.cloudfront.net/public/time-attack/schedules/{indexData.ScheduleFilename}.json",
-                                                      TimeAttackSeasonArrayContext.Default.TimeAttackSeasonArray,
-                                                      cancellationToken: cancellationToken)
-                                   .ConfigureAwait(false))
-                    ?? throw new iRacingDataClientException("Data not found.");
+        var data = await apiClient.GetUnauthenticatedResponseAsync(new Uri($"https://dqfp1ltauszrc.cloudfront.net/public/time-attack/schedules/{indexData.ScheduleFilename}.json"),
+                                                                   TimeAttackSeasonArrayContext.Default.TimeAttackSeasonArray,
+                                                                   cancellationToken: cancellationToken)
+                                  .ConfigureAwait(false)
+                   ?? throw new iRacingDataClientException("Data not found.");
 
-        return data!;
+        return data;
     }
 
     /// <inheritdoc />
     public async Task<DataResponse<TimeAttackMemberSeasonResult[]>> GetTimeAttackMemberSeasonResultsAsync(int competitionSeasonId, CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("Get Time Attack Member Season Results")
-                                           ?.AddTag("CompetitionSeasonId", competitionSeasonId);
+        logger.LogDebug("Get Time Attack Member Season Results for {CompetitionSeasonId}", competitionSeasonId);
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Get Time Attack Member Season Results")
+                                ?.AddTag("CompetitionSeasonId", competitionSeasonId);
 
         var queryParameters = new Dictionary<string, object?>
         {
             ["ta_comp_season_id"] = competitionSeasonId,
         };
 
-        var queryUrl = "https://members-ng.iracing.com/data/time_attack/member_season_results".ToUrlWithQuery(queryParameters);
+        var queryUrl = new Uri(apiBaseUrl, "/data/time_attack/member_season_results").WithQuery(queryParameters);
 
-        return await CreateResponseViaInfoLinkAsync(queryUrl,
-                                                    TimeAttackMemberSeasonResultArrayContext.Default.TimeAttackMemberSeasonResultArray,
-                                                    cancellationToken).ConfigureAwait(false);
+        var response = await apiClient.CreateResponseViaIntermediateResultAsync(queryUrl,
+                                                                                LinkResultContext.Default.LinkResult,
+                                                                                infoLinkResult => (new Uri(infoLinkResult.Link), infoLinkResult.Expires),
+                                                                                TimeAttackMemberSeasonResultArrayContext.Default.TimeAttackMemberSeasonResultArray,
+                                                                                cancellationToken)
+                                      .ConfigureAwait(false);
+
+        return response;
     }
 
     /// <inheritdoc />
-    public async Task<DataResponse<MemberRecap>> GetMemberRecapAsync(int? customerId = null, int? seasonYear = null, int? seasonQuarter = null, CancellationToken cancellationToken = default)
+    public async Task<DataResponse<MemberRecap>> GetMemberRecapAsync(int? customerId = null,
+                                                                     int? seasonYear = null,
+                                                                     int? seasonQuarter = null,
+                                                                     CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("Get Member Recap")
-                                           ?.AddTag("CustomerId", customerId)
-                                           ?.AddTag("SeasonYear", seasonYear)
-                                           ?.AddTag("SeasonQuarter", seasonQuarter);
+        logger.LogDebug("Get Member Recap for {CustomerId} {SeasonYear} {SeasonQuarter}", customerId, seasonYear, seasonQuarter);
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Get Member Recap")
+                               ?.AddTag("CustomerId", customerId)
+                               ?.AddTag("SeasonYear", seasonYear)
+                               ?.AddTag("SeasonQuarter", seasonQuarter);
 
         var queryParameters = new Dictionary<string, object?>
         {
@@ -2006,34 +2059,48 @@ public class DataClient(HttpClient httpClient,
             ["season"] = seasonQuarter,
         };
 
-        var queryUrl = "https://members-ng.iracing.com/data/stats/member_recap".ToUrlWithQuery(queryParameters);
+        var queryUrl = new Uri(apiBaseUrl, "/data/stats/member_recap").WithQuery(queryParameters);
 
-        return await CreateResponseViaInfoLinkAsync(queryUrl,
-                                                    MemberRecapContext.Default.MemberRecap,
-                                                    cancellationToken).ConfigureAwait(false);
+        var response = await apiClient.CreateResponseViaIntermediateResultAsync(queryUrl,
+                                                                                LinkResultContext.Default.LinkResult,
+                                                                                infoLinkResult => (new Uri(infoLinkResult.Link), infoLinkResult.Expires),
+                                                                                MemberRecapContext.Default.MemberRecap,
+                                                                                cancellationToken)
+                                      .ConfigureAwait(false);
+
+        return response;
     }
 
     /// <inheritdoc />
     public async Task<DataResponse<SpectatorSubsessionIds>> GetSpectatorSubsessionIdentifiersAsync(Common.EventType[]? eventTypes = null, CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("Get Spectator Subsession Identifiers");
+        logger.LogDebug("Get Spectator Subsession Identifiers");
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Get Spectator Subsession Identifiers");
 
         var queryParameters = new Dictionary<string, object?>
         {
             ["event_types"] = eventTypes,
         };
 
-        var queryUrl = "https://members-ng.iracing.com/data/season/spectator_subsessionids".ToUrlWithQuery(queryParameters);
+        var queryUrl = new Uri(apiBaseUrl, "/data/season/spectator_subsessionids").WithQuery(queryParameters);
 
-        return await CreateResponseViaInfoLinkAsync(queryUrl,
-                                                    SpectatorSubsessionIdsContext.Default.SpectatorSubsessionIds,
-                                                    cancellationToken).ConfigureAwait(false);
+        var response = await apiClient.CreateResponseViaIntermediateResultAsync(queryUrl,
+                                                                                LinkResultContext.Default.LinkResult,
+                                                                                infoLinkResult => (new Uri(infoLinkResult.Link), infoLinkResult.Expires),
+                                                                                SpectatorSubsessionIdsContext.Default.SpectatorSubsessionIds,
+                                                                                cancellationToken)
+                                      .ConfigureAwait(false);
+
+        return response;
     }
 
     /// <inheritdoc />
-    public async Task<DataResponse<SpectatorDetails>> GetSpectatorSubsessionDetailsAsync(Common.EventType[]? eventTypes = null, int[]? seasonIds = null, CancellationToken cancellationToken = default)
+    public async Task<DataResponse<SpectatorDetails>> GetSpectatorSubsessionDetailsAsync(Common.EventType[]? eventTypes = null,
+                                                                                         int[]? seasonIds = null,
+                                                                                         CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("Get Spectator Subsession Details");
+        logger.LogDebug("Get Spectator Subsession Details");
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Get Spectator Subsession Details");
 
         var queryParameters = new Dictionary<string, object?>
         {
@@ -2041,627 +2108,72 @@ public class DataClient(HttpClient httpClient,
             ["season_ids"] = seasonIds,
         };
 
-        var queryUrl = "https://members-ng.iracing.com/data/season/spectator_subsessionids_detail".ToUrlWithQuery(queryParameters);
-
-        return await CreateResponseViaInfoLinkAsync(queryUrl,
-                                                    SpectatorDetailsContext.Default.SpectatorDetails,
-                                                    cancellationToken).ConfigureAwait(false);
-    }
-
-    /// <inheritdoc />
-    public async Task<DriverStatisticsCsvFile> GetDriverStatisticsByCategoryCsvAsync(int categoryId, CancellationToken cancellationToken = default)
-    {
-        using var activity = activitySource.StartActivity("Get Driver Statistics By Category CSV")
-                                           ?.AddTag("CategoryId", categoryId);
-
-        var attempts = 0;
-        var statsUrl = categoryId switch
-        {
-            1 => new Uri("https://members-ng.iracing.com/data/driver_stats_by_category/oval"),
-            2 => new Uri("https://members-ng.iracing.com/data/driver_stats_by_category/road"),
-            3 => new Uri("https://members-ng.iracing.com/data/driver_stats_by_category/dirt_oval"),
-            4 => new Uri("https://members-ng.iracing.com/data/driver_stats_by_category/dirt_road"),
-            5 => new Uri("https://members-ng.iracing.com/data/driver_stats_by_category/sports_car"),
-            6 => new Uri("https://members-ng.iracing.com/data/driver_stats_by_category/formula_car"),
-            _ => throw new ArgumentOutOfRangeException(nameof(categoryId), categoryId, "Invalid Category Id value. Must be between 1 and 6 (inclusive)."),
-        };
-
-    RetryCsvDriverStatistics:
-        try
-        {
-            await EnsureLoggedInAsync(cancellationToken).ConfigureAwait(false);
-
-            var (infoLink, _) = await BuildLinkResultAsync(statsUrl, cancellationToken).ConfigureAwait(false);
-
-            var infoLinkUrl = new Uri(infoLink.Link);
-
-            var csvDataResponse = await httpClient.GetAsync(infoLinkUrl, cancellationToken).ConfigureAwait(false);
-
-            if (!csvDataResponse.IsSuccessStatusCode)
-            {
-                throw new iRacingDataClientException($"Failed to retrieve CSV data. HTTP response was \"{csvDataResponse.StatusCode} {csvDataResponse.ReasonPhrase}\"");
-            }
-
-            var fileName = csvDataResponse.Content.Headers.ContentDisposition?.FileName
-                           ?? infoLinkUrl.AbsolutePath.Split('/').LastOrDefault()
-                           ?? $"DriverStatistics_CategoryId_{categoryId}.csv";
-            var result = new DriverStatisticsCsvFile
-            {
-                CategoryId = categoryId,
-                FileName = fileName,
-#if NET6_0_OR_GREATER
-                ContentBytes = await csvDataResponse.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false)
-#else
-                ContentBytes = await csvDataResponse.Content.ReadAsByteArrayAsync().ConfigureAwait(false)
-#endif
-            };
-            return result;
-        }
-        catch (iRacingUnauthorizedResponseException unAuthEx)
-        {
-            attempts++;
-            if (attempts < 2)
-            {
-                _ = activity?.AddEvent(new("Retrying unauthorized response", tags: new([new("AttemptCount", attempts)])));
-                logger.RetryingUnauthorizedResponse(unAuthEx, statsUrl, attempts, 2);
-                goto RetryCsvDriverStatistics;
-            }
-            throw;
-        }
-    }
-
-    /// <summary>Will ensure the client is authenticated by checking the <see cref="IsLoggedIn"/> property and executing the login process if required.</summary>
-    /// <param name="cancellationToken">A token to allow the operation to be cancelled.</param>
-    /// <returns>A <see cref="Task"/> that resolves when the process is complete.</returns>
-    protected internal async Task EnsureLoggedInAsync(CancellationToken cancellationToken)
-    {
-        if (!IsLoggedIn)
-        {
-            await loginSemaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
-            try
-            {
-                if (!IsLoggedIn)
-                {
-                    await LoginInternalAsync(cancellationToken).ConfigureAwait(false);
-                }
-            }
-            finally
-            {
-                _ = loginSemaphore.Release();
-            }
-        }
-    }
-
-    private async Task LoginInternalAsync(CancellationToken cancellationToken)
-    {
-        using var activity = activitySource.StartActivity("Login");
-
-        if (string.IsNullOrWhiteSpace(options.Username))
-        {
-            throw iRacingClientOptionsValueMissingException.Create(nameof(options.Username));
-        }
-
-        if (string.IsNullOrWhiteSpace(options.Password))
-        {
-            throw iRacingClientOptionsValueMissingException.Create(nameof(options.Password));
-        }
-
-        try
-        {
-            if (options.RestoreCookies is not null
-                && options.RestoreCookies() is CookieCollection savedCookies)
-            {
-                cookieContainer.Add(savedCookies);
-            }
-
-            var cookies = cookieContainer.GetCookies(new Uri("https://members-ng.iracing.com"));
-            if (cookies["authtoken_members"] is { Expired: false })
-            {
-                IsLoggedIn = true;
-                logger.LoginCookiesRestored(options.Username!);
-                return;
-            }
-
-            string? encodedHash = null;
-
-            if (options.PasswordIsEncoded)
-            {
-                encodedHash = options.Password;
-            }
-            else
-            {
-#pragma warning disable CA1308 // Normalize strings to uppercase - iRacing API requires lowercase
-                var passwordAndEmail = options.Password + (options.Username?.ToLowerInvariant());
-#pragma warning restore CA1308 // Normalize strings to uppercase
-
-#if NET6_0_OR_GREATER
-                var hashedPasswordAndEmailBytes = SHA256.HashData(Encoding.UTF8.GetBytes(passwordAndEmail));
-#else
-                using var sha256 = SHA256.Create();
-                var hashedPasswordAndEmailBytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(passwordAndEmail));
-#endif
-
-                encodedHash = Convert.ToBase64String(hashedPasswordAndEmailBytes);
-            }
-
-            var loginResponse = await httpClient.PostAsJsonAsync("https://members-ng.iracing.com/auth",
-                                                                 new
-                                                                 {
-                                                                     email = options.Username,
-                                                                     password = encodedHash
-                                                                 },
-                                                                 cancellationToken)
-                                                .ConfigureAwait(false);
-
-            if (!loginResponse.IsSuccessStatusCode)
-            {
-                if (loginResponse.StatusCode == HttpStatusCode.ServiceUnavailable)
-                {
-                    throw new iRacingInMaintenancePeriodException("Maintenance assumed because login returned HTTP Error 503 \"Service Unavailable\".");
-                }
-                else if (loginResponse.StatusCode == HttpStatusCode.Unauthorized)
-                {
-#if NET6_0_OR_GREATER
-                    var content = await loginResponse.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-#else
-                    var content = await loginResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
-#endif
-                    var errorResponse = JsonSerializer.Deserialize<ErrorResponse>(content);
-
-                    if (errorResponse is not null && errorResponse.ErrorCode == "access_denied")
-                    {
-                        var errorDescription = errorResponse.ErrorDescription ?? errorResponse.Note ?? errorResponse.Message ?? string.Empty;
-                        throw iRacingLoginFailedException.Create($"Access was denied with message \"{errorDescription}\"",
-                                                                 false,
-                                                                 errorDescription.Equals("legacy authorization refused", StringComparison.OrdinalIgnoreCase));
-                    }
-                }
-                throw new iRacingLoginFailedException($"Login failed with HTTP response \"{loginResponse.StatusCode} {loginResponse.ReasonPhrase}\"");
-            }
-
-            var loginResult = await loginResponse.Content.ReadFromJsonAsync(LoginResponseContext.Default.LoginResponse, cancellationToken).ConfigureAwait(false);
-
-            if (loginResult is null || !loginResult.Success)
-            {
-                var message = loginResult?.Message ?? $"Login failed with HTTP response \"{loginResponse.StatusCode} {loginResponse.ReasonPhrase}\"";
-                throw iRacingLoginFailedException.Create(message, loginResult?.VerificationRequired, string.Equals(loginResult?.Message, "Legacy authorization refused.", StringComparison.OrdinalIgnoreCase));
-            }
-
-            IsLoggedIn = true;
-            logger.LoginSuccessful(options.Username!);
-
-            if (options.SaveCookies is Action<CookieCollection> saveCredentials)
-            {
-                saveCredentials(cookieContainer.GetAllCookies());
-            }
-        }
-        catch (Exception ex) when (ex is not iRacingDataClientException)
-        {
-            throw iRacingLoginFailedException.Create(ex);
-        }
-    }
-
-    private const string RateLimitExceededContent = "Rate limit exceeded";
-
-    protected virtual async Task<DataResponse<TData>> CreateResponseViaInfoLinkAsync<TData>(Uri infoLinkUri,
-                                                                                            JsonTypeInfo<TData> jsonTypeInfo,
-                                                                                            CancellationToken cancellationToken)
-    {
-        var attempts = 0;
-
-    RetryResponseViaInfoLink:
-        try
-        {
-            await EnsureLoggedInAsync(cancellationToken).ConfigureAwait(false);
-
-            var (infoLink, headers) = await BuildLinkResultAsync(infoLinkUri, cancellationToken).ConfigureAwait(false);
-            _ = System.Diagnostics.Activity.Current?.AddEvent(new ActivityEvent("Result Link Retrieved"));
-
-            var data = await httpClient.GetFromJsonAsync(infoLink.Link, jsonTypeInfo, cancellationToken)
-                                       .ConfigureAwait(false)
-                                       ?? throw new iRacingDataClientException("Data not found.");
-            _ = System.Diagnostics.Activity.Current?.AddEvent(new ActivityEvent("Data Retrieved"));
-
-            return BuildDataResponse(headers, data, logger, infoLink.Expires);
-        }
-        catch (iRacingUnauthorizedResponseException unAuthEx)
-        {
-            attempts++;
-            if (attempts <= 2)
-            {
-                _ = System.Diagnostics.Activity.Current?.AddEvent(new("Retrying unauthorized response", tags: new([new("AttemptCount", attempts)])));
-                logger.RetryingUnauthorizedResponse(unAuthEx, infoLinkUri, attempts, 2);
-                goto RetryResponseViaInfoLink;
-            }
-            throw;
-        }
-    }
-
-    protected virtual async Task<DataResponse<TData>> CreateResponseViaDataUrlAsync<TData>(Uri dataUrlUri,
-                                                                                           JsonTypeInfo<TData> jsonTypeInfo,
-                                                                                           CancellationToken cancellationToken)
-    {
-        var attempts = 0;
-
-    RetryResponseViaInfoLink:
-        try
-        {
-            await EnsureLoggedInAsync(cancellationToken).ConfigureAwait(false);
-
-            var (dataUrlResult, headers) = await BuildIntermediateResultAsync(dataUrlUri, DataUrlResultContext.Default.DataUrlResult, cancellationToken).ConfigureAwait(false);
-
-            if (dataUrlResult is null || string.IsNullOrWhiteSpace(dataUrlResult.DataUrl))
-            {
-                throw new iRacingDataClientException("Unrecognized result.");
-            }
-
-            _ = System.Diagnostics.Activity.Current?.AddEvent(new ActivityEvent("Data URL Link Retrieved"));
-
-            var data = await httpClient.GetFromJsonAsync(dataUrlResult.DataUrl, jsonTypeInfo, cancellationToken)
-                                       .ConfigureAwait(false)
-                                       ?? throw new iRacingDataClientException("Data not found.");
-            _ = System.Diagnostics.Activity.Current?.AddEvent(new ActivityEvent("Data Retrieved"));
-
-            return BuildDataResponse(headers, data, logger);
-        }
-        catch (iRacingUnauthorizedResponseException unAuthenticatedEx)
-        {
-            attempts++;
-            if (attempts <= 2)
-            {
-                _ = System.Diagnostics.Activity.Current?.AddEvent(new("Retrying unauthorized response", tags: new([new("AttemptCount", attempts)])));
-                logger.RetryingUnauthorizedResponse(unAuthenticatedEx, dataUrlUri, attempts, 2);
-                goto RetryResponseViaInfoLink;
-            }
-            throw;
-        }
-    }
-
-    protected virtual async Task<DataResponse<(TData, TChunkData[])>> CreateResponseFromChunkedDataAsync<TData, THeaderData, TChunkData>(Uri uri, JsonTypeInfo<TData> jsonTypeInfo, JsonTypeInfo<TChunkData[]> chunkArrayTypeInfo, CancellationToken cancellationToken)
-        where TData : IChunkInfoResultHeader<THeaderData>
-        where THeaderData : IChunkInfoResultHeaderData
-    {
-        var attempts = 0;
-
-    RetryResponseFromChunkedData:
-        try
-        {
-            await EnsureLoggedInAsync(cancellationToken).ConfigureAwait(false);
-
-            var response = await httpClient.GetAsync(uri, cancellationToken).ConfigureAwait(false);
-
-            // This isn't the most performant way of going here, but annoyingly if you exceed the rate limit it isn't an issue just
-            // the string "Rate limit exceeded" so we need the string to check that.
-#if NET6_0_OR_GREATER
-            var responseContent = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-#else
-            var responseContent = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-#endif
-            if (!response.IsSuccessStatusCode || responseContent == RateLimitExceededContent)
-            {
-                HandleUnsuccessfulResponse(response, responseContent, logger);
-            }
-
-            TData headerData = await response.Content.ReadFromJsonAsync(jsonTypeInfo, cancellationToken: cancellationToken)
-                                                   .ConfigureAwait(false)
-                             ?? throw new iRacingDataClientException("Data not found.");
-
-            var searchResults = new List<TChunkData>();
-
-            _ = System.Diagnostics.Activity.Current?.AddTag("NumberOfResultChunks", headerData.Data.ChunkInfo.NumberOfChunks);
-
-            if (headerData.Data.ChunkInfo is ChunkInfo { NumberOfChunks: > 0 } chunkInfo)
-            {
-                var baseChunkUrl = new Uri(chunkInfo.BaseDownloadUrl);
-
-                foreach (var (chunkFileName, index) in chunkInfo.ChunkFileNames.Select((fn, i) => (fn, i)))
-                {
-                    _ = System.Diagnostics.Activity.Current?.AddEvent(new("Start downloading chunk", tags: new([new("ChunkIndex", index)])));
-
-                    var chunkUrl = new Uri(baseChunkUrl, chunkFileName);
-
-                    var chunkResponse = await httpClient.GetAsync(chunkUrl, cancellationToken).ConfigureAwait(false);
-                    if (!chunkResponse.IsSuccessStatusCode)
-                    {
-                        logger.FailedToRetrieveChunkError(index, chunkInfo.NumberOfChunks, chunkResponse.StatusCode, chunkResponse.ReasonPhrase);
-                        continue;
-                    }
-
-                    var chunkData = await chunkResponse.Content.ReadFromJsonAsync(chunkArrayTypeInfo, cancellationToken).ConfigureAwait(false);
-                    if (chunkData is null)
-                    {
-                        continue;
-                    }
-
-                    searchResults.AddRange(chunkData);
-                }
-            }
-
-            return BuildDataResponse<(TData Header, TChunkData[] Results)>(response.Headers, (headerData, searchResults.ToArray()), logger);
-        }
-        catch (iRacingUnauthorizedResponseException unAuthEx)
-        {
-            attempts++;
-            if (attempts <= 2)
-            {
-                _ = System.Diagnostics.Activity.Current?.AddEvent(new("Retrying unauthorized response", tags: new([new("AttemptCount", attempts)])));
-                logger.RetryingUnauthorizedResponse(unAuthEx, uri, attempts, 2);
-                goto RetryResponseFromChunkedData;
-            }
-            throw;
-        }
-    }
-
-    protected virtual async Task<DataResponse<(TData, TChunkData[])>> CreateResponseViaInfoLinkToChunkInfoAsync<TData, TChunkData>(Uri infoLinkUri, JsonTypeInfo<TData> jsonTypeInfo, JsonTypeInfo<TChunkData[]> chunkArrayTypeInfo, CancellationToken cancellationToken)
-        where TData : IChunkInfoResultHeaderData
-    {
-        var attempts = 0;
-
-    RetryResponseViaInfoLinkToChunkInfo:
-        try
-        {
-            await EnsureLoggedInAsync(cancellationToken).ConfigureAwait(false);
-
-            var (infoLink, headers) = await BuildLinkResultAsync(infoLinkUri, cancellationToken).ConfigureAwait(false);
-
-            TData headerData = (await httpClient.GetFromJsonAsync(infoLink.Link, jsonTypeInfo, cancellationToken).ConfigureAwait(false))
-                             ?? throw new iRacingDataClientException("Data not found.");
-
-            var searchResults = new List<TChunkData>();
-
-            _ = System.Diagnostics.Activity.Current?.AddTag("NumberOfResultChunks", headerData.ChunkInfo.NumberOfChunks);
-
-            if (headerData.ChunkInfo is ChunkInfo { NumberOfChunks: > 0 } chunkInfo)
-            {
-                var baseChunkUrl = new Uri(chunkInfo.BaseDownloadUrl);
-
-                foreach (var (chunkFileName, index) in chunkInfo.ChunkFileNames.Select((fn, i) => (fn, i)))
-                {
-                    _ = System.Diagnostics.Activity.Current?.AddEvent(new("Start downloading chunk", tags: new([new("ChunkIndex", index)])));
-
-                    var chunkUrl = new Uri(baseChunkUrl, chunkFileName);
-
-                    var chunkResponse = await httpClient.GetAsync(chunkUrl, cancellationToken).ConfigureAwait(false);
-                    if (!chunkResponse.IsSuccessStatusCode)
-                    {
-                        logger.FailedToRetrieveChunkError(index, chunkInfo.NumberOfChunks, chunkResponse.StatusCode, chunkResponse.ReasonPhrase);
-                        continue;
-                    }
-
-                    var chunkData = await chunkResponse.Content.ReadFromJsonAsync(chunkArrayTypeInfo, cancellationToken).ConfigureAwait(false);
-                    if (chunkData is null)
-                    {
-                        continue;
-                    }
-
-                    searchResults.AddRange(chunkData);
-                }
-            }
-
-            return BuildDataResponse<(TData Header, TChunkData[] Results)>(headers, (headerData, searchResults.ToArray()), logger);
-        }
-        catch (iRacingUnauthorizedResponseException unAuthEx)
-        {
-            attempts++;
-            if (attempts <= 2)
-            {
-                _ = System.Diagnostics.Activity.Current?.AddEvent(new("Retrying unauthorized response", tags: new([new("AttemptCount", attempts)])));
-                logger.RetryingUnauthorizedResponse(unAuthEx, infoLinkUri, attempts, 2);
-                goto RetryResponseViaInfoLinkToChunkInfo;
-            }
-            throw;
-        }
-    }
-
-    protected virtual async Task<(TResult Result, HttpResponseHeaders Headers)> GetResponseWithHeadersFromJsonAsync<TResult>(Uri uri, JsonTypeInfo<TResult> jsonTypeInfo, CancellationToken cancellationToken)
-        where TResult : class
-    {
-        var attempts = 0;
-
-    RetryResponseWithHeadersFromJson:
-        try
-        {
-            await EnsureLoggedInAsync(cancellationToken).ConfigureAwait(false);
-
-            var response = await httpClient.GetAsync(uri, cancellationToken).ConfigureAwait(false);
-
-#if NET6_0_OR_GREATER
-            var content = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-#else
-            var content = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-#endif
-
-            if (!response.IsSuccessStatusCode || content == RateLimitExceededContent)
-            {
-                HandleUnsuccessfulResponse(response, content, logger);
-            }
-
-            var result = JsonSerializer.Deserialize(content, jsonTypeInfo)
-                         ?? throw new iRacingDataClientException("Unrecognized result.");
-
-            _ = System.Diagnostics.Activity.Current?.AddEvent(new ActivityEvent("Data Retrieved"));
-
-            return (result, response.Headers);
-        }
-        catch (iRacingUnauthorizedResponseException unAuthEx)
-        {
-            attempts++;
-            if (attempts <= 2)
-            {
-                _ = System.Diagnostics.Activity.Current?.AddEvent(new("Retrying unauthorized response", tags: new([new("AttemptCount", attempts)])));
-                logger.RetryingUnauthorizedResponse(unAuthEx, uri, attempts, 2);
-                goto RetryResponseWithHeadersFromJson;
-            }
-            throw;
-        }
-    }
-
-    protected virtual async Task<TResult> GetResponseFromJsonAsync<TResult>(Uri uri, JsonTypeInfo<TResult> jsonTypeInfo, CancellationToken cancellationToken)
-        where TResult : class
-    {
-        var attempts = 0;
-
-    RetryResponseFromJson:
-        try
-        {
-            await EnsureLoggedInAsync(cancellationToken).ConfigureAwait(false);
-
-            var response = await httpClient.GetFromJsonAsync(uri, jsonTypeInfo, cancellationToken).ConfigureAwait(false)
-                           ?? throw new iRacingDataClientException("Data not found.");
-
-            _ = System.Diagnostics.Activity.Current?.AddEvent(new ActivityEvent("Data Retrieved"));
-
-            return response;
-        }
-        catch (iRacingUnauthorizedResponseException unAuthEx)
-        {
-            attempts++;
-            if (attempts <= 2)
-            {
-                _ = System.Diagnostics.Activity.Current?.AddEvent(new("Retrying unauthorized response", tags: new([new("AttemptCount", attempts)])));
-                logger.RetryingUnauthorizedResponse(unAuthEx, uri, attempts, 2);
-                goto RetryResponseFromJson;
-            }
-            throw;
-        }
-    }
-
-    protected virtual async Task<(LinkResult, HttpResponseHeaders)> BuildLinkResultAsync(Uri infoLinkUri, CancellationToken cancellationToken)
-    {
-        var (linkResult, headers) = await BuildIntermediateResultAsync(infoLinkUri, LinkResultContext.Default.LinkResult, cancellationToken).ConfigureAwait(false);
-
-        return linkResult is null || linkResult.Link is null
-            ? throw new iRacingDataClientException("Unrecognized result.")
-            : ((LinkResult, HttpResponseHeaders))(linkResult, headers);
-    }
-
-    protected virtual async Task<(TResult?, HttpResponseHeaders)> BuildIntermediateResultAsync<TResult>(Uri intermediateUri, JsonTypeInfo<TResult> jsonTypeInfo, CancellationToken cancellationToken)
-    {
-        var intermediateResponse = await httpClient.GetAsync(intermediateUri, cancellationToken).ConfigureAwait(false);
-
-#if NET6_0_OR_GREATER
-        var content = await intermediateResponse.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-#else
-        var content = await intermediateResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
-#endif
-
-        if (!intermediateResponse.IsSuccessStatusCode || content == RateLimitExceededContent)
-        {
-            HandleUnsuccessfulResponse(intermediateResponse, content, logger);
-        }
-
-        var result = JsonSerializer.Deserialize(content, jsonTypeInfo);
-        return (result, intermediateResponse.Headers);
-    }
-
-    protected virtual void HandleUnsuccessfulResponse(HttpResponseMessage httpResponse, string content, ILogger logger)
-    {
-#if NET6_0_OR_GREATER
-        ArgumentNullException.ThrowIfNull(httpResponse);
-#else
-        if (httpResponse is null)
-        {
-            throw new ArgumentNullException(nameof(httpResponse));
-        }
-#endif
-
-        string? errorDescription;
-        Exception? exception;
-        content = content?.Trim() ?? string.Empty;
-        if (content == "Rate limit exceeded")
-        {
-            errorDescription = content;
-            exception = iRacingRateLimitExceededException.Create();
-        }
-#if NET6_0_OR_GREATER
-        else if (content.StartsWith('<'))
-#else
-        else if (content.StartsWith("<", StringComparison.OrdinalIgnoreCase))
-#endif
-        {
-            exception = iRacingUnknownResponseException.Create(httpResponse.StatusCode, content);
-            errorDescription = exception.Message;
-        }
-        else
-        {
-            var errorResponse = JsonSerializer.Deserialize<ErrorResponse>(content);
-            errorDescription = errorResponse?.Note ?? errorResponse?.Message ?? errorResponse?.ErrorDescription ?? "An error occurred.";
-
-            exception = errorResponse switch
-            {
-                { ErrorCode: "Site Maintenance" } => new iRacingInMaintenancePeriodException(errorResponse.Note ?? "iRacing services are down for maintenance."),
-                { ErrorCode: "Forbidden" } => iRacingForbiddenResponseException.Create(),
-                { ErrorCode: "Unauthorized" } or { ErrorCode: "access_denied" } => iRacingUnauthorizedResponseException.Create(errorResponse.Message),
-                _ => null
-            };
-        }
-
-        if (exception is null)
-        {
-            logger.ErrorResponseUnknown();
-            _ = httpResponse.EnsureSuccessStatusCode();
-        }
-        else
-        {
-            if (exception is iRacingUnauthorizedResponseException)
-            {
-                // Unauthorized might just be our session expired
-                IsLoggedIn = false;
-
-                // Clear any saved cookies
-                options.SaveCookies?.Invoke([]);
-            }
-
-            logger.ErrorResponse(errorDescription, exception);
-            throw exception;
-        }
-    }
-
-    protected static DataResponse<TData> BuildDataResponse<TData>(HttpResponseHeaders headers, TData data, ILogger logger, DateTimeOffset? expires = null)
-    {
-#if NET6_0_OR_GREATER
-        ArgumentNullException.ThrowIfNull(headers);
-#else
-        if (headers is null)
-        {
-            throw new ArgumentNullException(nameof(headers));
-        }
-#endif
-
-        var response = new DataResponse<TData> { Data = data };
-
-        if (headers.TryGetValues("x-ratelimit-remaining", out var remainingValues)
-            && remainingValues.Any()
-            && int.TryParse(remainingValues.First(), out var remaining))
-        {
-            response.RateLimitRemaining = remaining;
-        }
-
-        if (headers.TryGetValues("x-ratelimit-limit", out var limitValues)
-            && limitValues.Any()
-            && int.TryParse(limitValues.First(), out var limit))
-        {
-            response.TotalRateLimit = limit;
-        }
-
-        if (headers.TryGetValues("x-ratelimit-reset", out var resetValues)
-            && resetValues.Any()
-            && long.TryParse(resetValues.First(), out var resetTimeUnixSeconds))
-        {
-            response.RateLimitReset = DateTimeOffset.FromUnixTimeSeconds(resetTimeUnixSeconds);
-        }
-
-        response.DataExpires = expires;
-
-        logger.RateLimitsUpdated(response.RateLimitRemaining, response.TotalRateLimit, response.RateLimitReset);
+        var queryUrl = new Uri(apiBaseUrl, "/data/season/spectator_subsessionids_detail").WithQuery(queryParameters);
+
+        var response = await apiClient.CreateResponseViaIntermediateResultAsync(queryUrl,
+                                                                                LinkResultContext.Default.LinkResult,
+                                                                                infoLinkResult => (new Uri(infoLinkResult.Link), infoLinkResult.Expires),
+                                                                                SpectatorDetailsContext.Default.SpectatorDetails,
+                                                                                cancellationToken)
+                                      .ConfigureAwait(false);
 
         return response;
     }
 
     /// <inheritdoc />
+    public async Task<DriverStatisticsCsvFile> GetDriverStatisticsByCategoryCsvAsync(int categoryId, CancellationToken cancellationToken = default)
+    {
+        logger.LogDebug("Get Driver Statistics By Category CSV");
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Get Driver Statistics By Category CSV")
+                                ?.AddTag("CategoryId", categoryId);
+
+        //var attempts = 0;
+        var statsUrl = categoryId switch
+        {
+            1 => new Uri(apiBaseUrl, "/data/driver_stats_by_category/oval"),
+            2 => new Uri(apiBaseUrl, "/data/driver_stats_by_category/road"),
+            3 => new Uri(apiBaseUrl, "/data/driver_stats_by_category/dirt_oval"),
+            4 => new Uri(apiBaseUrl, "/data/driver_stats_by_category/dirt_road"),
+            5 => new Uri(apiBaseUrl, "/data/driver_stats_by_category/sports_car"),
+            6 => new Uri(apiBaseUrl, "/data/driver_stats_by_category/formula_car"),
+            _ => throw new ArgumentOutOfRangeException(nameof(categoryId), categoryId, "Invalid Category Id value. Must be between 1 and 6 (inclusive)."),
+        };
+
+        var infoLinkResult = await apiClient.GetDataResponseAsync(statsUrl, LinkResultContext.Default.LinkResult, cancellationToken)
+                                            .ConfigureAwait(false)
+                             ?? throw new iRacingDataClientException("Invalid or missing link result getting driver statistics.");
+
+        var infoLinkUrl = new Uri(infoLinkResult.Data.Link);
+        var csvDataResponse = await apiClient.GetUnauthenticatedRawResponseAsync(infoLinkUrl, cancellationToken)
+                                         .ConfigureAwait(false);
+
+        if (!csvDataResponse.IsSuccessStatusCode)
+        {
+            throw new iRacingDataClientException($"Failed to retrieve CSV data. HTTP response was \"{csvDataResponse.StatusCode} {csvDataResponse.ReasonPhrase}\"");
+        }
+
+        var fileName = csvDataResponse.Content.Headers.ContentDisposition?.FileName
+                       ?? infoLinkUrl.AbsolutePath.Split('/').LastOrDefault()
+                       ?? $"DriverStatistics_CategoryId_{categoryId}.csv";
+
+        var result = new DriverStatisticsCsvFile
+        {
+            CategoryId = categoryId,
+            FileName = fileName,
+#if NET6_0_OR_GREATER
+            ContentBytes = await csvDataResponse.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false)
+#else
+            ContentBytes = await csvDataResponse.Content.ReadAsByteArrayAsync().ConfigureAwait(false)
+#endif
+        };
+        return result;
+    }
+
+    /// <inheritdoc />
     public IEnumerable<Uri> GetTrackAssetScreenshotUris(Tracks.Track track, TrackAssets trackAssets)
     {
-        using var activity = activitySource.StartActivity("Get Track Asset Screenshot URIs");
+        logger.LogDebug("Get Track Asset Screenshot URIs");
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Get Track Asset Screenshot URIs");
 
 #if NET6_0_OR_GREATER
         ArgumentNullException.ThrowIfNull(track);
@@ -2704,7 +2216,8 @@ public class DataClient(HttpClient httpClient,
     /// <inheritdoc />
     public async Task<IEnumerable<Uri>> GetTrackAssetScreenshotUrisAsync(int trackId, CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("Get Track Asset Screenshot URIs for Track ID");
+        logger.LogDebug("Get Track Asset Screenshot URIs for Track ID");
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Get Track Asset Screenshot URIs for Track ID");
 
         var tracksResponse = await GetTracksAsync(cancellationToken).ConfigureAwait(false);
 
@@ -2740,41 +2253,20 @@ public class DataClient(HttpClient httpClient,
     /// <inheritdoc />
     public async Task<IEnumerable<WeatherForecast>> GetWeatherForecastFromUrlAsync(Uri url, CancellationToken cancellationToken = default)
     {
-        using var activity = activitySource.StartActivity("Get Weather Forecast From URL");
+        logger.LogDebug("Get Weather Forecast From URL");
+        using var activity = AydskoDataClientDiagnostics.ActivitySource.StartActivity("Get Weather Forecast From URL");
 
-        var data = await httpClient.GetFromJsonAsync(url, WeatherForecastArrayContext.Default.ListWeatherForecast, cancellationToken: cancellationToken)
-                                   .ConfigureAwait(false)
+        var data = await apiClient.GetUnauthenticatedResponseAsync(url,
+                                                                   WeatherForecastArrayContext.Default.ListWeatherForecast,
+                                                                   cancellationToken)
+                                  .ConfigureAwait(false)
                    ?? throw new iRacingDataClientException("Data not found.");
 
         return data;
     }
 
-    protected virtual void Dispose(bool disposing)
+    public Task<DataResponse<MemberChart>> GetMemberChartData(int? customerId, int categoryId, MemberChartType chartType, CancellationToken cancellationToken = default)
     {
-        if (!disposedValue)
-        {
-            if (disposing)
-            {
-                loginSemaphore.Dispose();
-            }
-
-            // TODO: free unmanaged resources (unmanaged objects) and override finalizer
-            // TODO: set large fields to null
-            disposedValue = true;
-        }
-    }
-
-    // // TODO: override finalizer only if 'Dispose(bool disposing)' has code to free unmanaged resources
-    // ~DataClient()
-    // {
-    //     // Do not change this code. Put cleanup code in 'Dispose(bool disposing)' method
-    //     Dispose(disposing: false);
-    // }
-
-    public void Dispose()
-    {
-        // Do not change this code. Put cleanup code in 'Dispose(bool disposing)' method
-        Dispose(disposing: true);
-        GC.SuppressFinalize(this);
+        throw new NotImplementedException();
     }
 }

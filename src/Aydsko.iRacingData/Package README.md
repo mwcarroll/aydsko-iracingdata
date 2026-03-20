@@ -4,13 +4,22 @@
 
 This library allows access via .NET to the iRacing "Data API". These APIs allow a properly authenticated user a supported method of accessing data from the service.
 
-## ⚠ Multi-Factor Authentication Requirement
+## Authentication Types
 
-iRacing now require multi-factor authentication (MFA) for all users by default. This will affect the ability to use the iRacing Data API by logging in with a username or password.
+### Legacy Authentication (Username / Password)
 
-In the immediate future, use of the Data API will be supported by enabling "Legacy Authentication" in your iRacing account settings. iRacing will advise next steps for the authentication of applications for the Data API later on.
+**This authentication is no longer supported.** Legacy authentication was removed 9 Dec 2025. See: https://forums.iracing.com/discussion/84226/legacy-authentication-removal-dec-9-2025
 
-To continue to use this library you **must** [enable "Legacy Authentication" in your iRacing account settings](https://support.iracing.com/support/solutions/articles/31000173894-enabling-or-disabling-legacy-read-only-authentication) before attempting to authenticate. Please **do not** enable this setting unless you require it, as it may reduce the security on your iRacing account.
+One of the OAuth-based authentication methods is now required.
+
+### iRacing OAuth Authentication
+
+To use this authentication method you need to contact iRacing who will allocate a "Client ID" and "Client Secret".
+
+- ["Authorization Code Flow"](https://oauth.iracing.com/oauth2/book/authorization_code_flow.html) is intended for interactive applications, either client apps or web-based apps. It allows users to authenticate with iRacing.
+- ["Password Limited Flow"](https://oauth.iracing.com/oauth2/book/password_limited_flow.html) is authentication intended for scripts or back-end processes that do not need to access the details of specific users.
+
+Full information is available from the [iRacing.com Auth Service Documentation](https://oauth.iracing.com/oauth2/book/introduction.html).
 
 ## Getting Started
 
@@ -26,11 +35,38 @@ dotnet add package Aydsko.iRacingData
 
 Register the iRacing Data API client classes with the service provider.
 
+Using iRacing OAuth "Authentication Code Grant" authentication:
+```csharp
+
+public class MyTokenSource : IOAuthTokenSource
+{
+    public async Task<OAuthTokenValue> GetTokenAsync(CancellationToken cancellationToken = default)
+    {
+        // TODO - Implement retrieval of the iRacing authentication token
+        //        via the "/authorize" and "/token" endpoints or retrieve
+        //        a previous token from secure storage.
+    }
+}
+
+services.AddIRacingDataApi(options =>
+{
+    options.UseProductUserAgent("MyApplicationName", new Version(1, 0));
+
+    // Supply the "IOAuthTokenSource" implementation.
+    options.UseOAuthTokenSource(sp => sp.GetRequiredService<MyTokenSource>());
+});
+```
+
+OR
+
+Using iRacing OAuth "Password Limited Grant" authentication:
 ```csharp
 services.AddIRacingDataApi(options =>
 {
-    options.UserAgentProductName = "MyApplicationName";
-    options.UserAgentProductVersion = new Version(1, 0);
+    options.UseProductUserAgent("MyApplicationName", new Version(1, 0));
+
+    // Supply your iRacing username, password, client id, and client secret.
+    options.UsePasswordLimitedOAuth(iRacingUsername, iRacingPassword, iRacingClientId, iRacingClientSecret);
 });
 ```
 
@@ -41,9 +77,6 @@ Use the `IDataClient` from the service provider to authenticate and request data
 ```csharp
 // Retrieve an instance from the service provider.
 var dataClient = serviceProvider.GetRequiredService<IDataClient>();
-
-// Supply your iRacing username and password.
-dataClient.UseUsernameAndPassword(iRacingUsername, iRacingPassword);
 
 // Retrieve information about our own account.
 var infoResponse = await dataClient.GetMyInfoAsync(cancellationToken);
@@ -75,8 +108,7 @@ Register the iRacing Data API caching client classes with the service provider.
 ```csharp
 services.AddIRacingDataApiWithCaching(options =>
 {
-    options.UserAgentProductName = "MyApplicationName";
-    options.UserAgentProductVersion = new Version(1, 0);
+    // [... normal configuration for your chosen authentication type here]
 });
 ```
 

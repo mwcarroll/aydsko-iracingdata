@@ -1,4 +1,4 @@
-﻿// © 2023 Adrian Clark
+﻿// © Adrian Clark - Aydsko.iRacingData
 // This file is licensed to you under the MIT license.
 
 using System.Globalization;
@@ -6,9 +6,7 @@ using System.Linq.Expressions;
 using System.Reflection;
 using System.Text;
 
-#if NET6_0_OR_GREATER
-//using System.Reflection.Metadata;
-#else
+#if !NET6_0_OR_GREATER
 using System.Collections;
 using System.Net;
 #endif
@@ -55,12 +53,18 @@ internal static class Extensions
         parameters.Add(new(parameterName, parameterValue));
     }
 
-    internal static Uri ToUrlWithQuery(this string url, IEnumerable<KeyValuePair<string, object?>> parameters)
+    /// <summary>Replaces the query with a string built from the given parameters.</summary>
+    /// <param name="url">The URI to use as a base, must be an absolute URI.</param>
+    /// <param name="parameters">The parameters to encode and use to create the query string.</param>
+    /// <returns>A new URI with the query string appended.</returns>
+    internal static Uri WithQuery(this Uri url, IEnumerable<KeyValuePair<string, object?>> parameters)
     {
-        var builder = new UriBuilder(url);
+        if (url is null || url.IsAbsoluteUri == false)
+        {
+            throw new ArgumentOutOfRangeException(nameof(url));
+        }
 
         var queryBuilder = new StringBuilder();
-        _ = queryBuilder.Append(builder.Query.TrimStart('?'));
 
         foreach (var parameter in parameters)
         {
@@ -95,7 +99,10 @@ internal static class Extensions
             }
         }
 
-        builder.Query = queryBuilder.ToString();
+        var builder = new UriBuilder(url)
+        {
+            Query = queryBuilder.ToString()
+        };
 
         return builder.Uri;
     }
@@ -106,10 +113,10 @@ internal static class Extensions
         switch (parameterValue)
         {
             case string stringParam:
-                return new[] { stringParam };
+                return [stringParam];
 
             case DateTime dateTimeParam:
-                return new[] { dateTimeParam.ToString("yyyy-MM-dd\\THH:mm\\Z", CultureInfo.InvariantCulture) };
+                return [dateTimeParam.ToString("yyyy-MM-dd\\THH:mm\\Z", CultureInfo.InvariantCulture)];
 
             case Array arrayParam:
                 return GetNonNullValues(arrayParam).ToArray();
@@ -118,15 +125,15 @@ internal static class Extensions
                 return enumerableOfString.ToArray();
 
             case bool boolParam:
-                return new[] { boolParam.ToString().ToLowerInvariant() };
+                return [boolParam.ToString().ToLowerInvariant()];
 
             case Enum @enum:
-                return new[] { @enum.ToString("D") };
+                return [@enum.ToString("D")];
 
             default:
                 if (Convert.ToString(parameterValue, CultureInfo.InvariantCulture) is string parameterStringValue)
                 {
-                    return new[] { parameterStringValue };
+                    return [parameterStringValue];
                 }
                 else
                 {
@@ -150,7 +157,7 @@ internal static class Extensions
         }
     }
 
-#if NET6_0_OR_GREATER == false
+#if !NET6_0_OR_GREATER
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Globalization", "CA1304:Specify CultureInfo", Justification = "<Pending>")]
     internal static CookieCollection GetAllCookies(this CookieContainer container)
     {

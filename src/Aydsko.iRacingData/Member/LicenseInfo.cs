@@ -1,22 +1,32 @@
-﻿// © 2023 Adrian Clark
+﻿// © Adrian Clark - Aydsko.iRacingData
 // This file is licensed to you under the MIT license.
 
 namespace Aydsko.iRacingData.Member;
 
-public class LicenseInfo : License
+public class LicenseInfo
+    : License
 {
     [JsonPropertyName("cpi")]
     public decimal CornersPerIncident { get; set; }
 
-    [JsonPropertyName("irating")]
-    public int IRating { get; set; }
-
-    [JsonPropertyName("tt_rating")]
-    public int TTRating { get; set; }
-
     [JsonPropertyName("mpr_num_races")]
-    public int MprNumberOfRaces { get; set; }
+    public int MinimumParticipationRequirementNumberOfRaces { get; set; }
 
     [JsonPropertyName("mpr_num_tts")]
-    public int MprNumberOfTimeTrials { get; set; }
+    public int MinimumParticipationRequirementNumberOfTimeTrials { get; set; }
+
+    [JsonPropertyName("pro_promotable")]
+    public bool IsPromotableToPro { get; set; }
+
+    [JsonPropertyName("seq")]
+    public int Sequence { get; set; }
+
+    [JsonIgnore, Obsolete("Use \"TimeTrialRating\" instead.")]
+    public int TTRating { get => TimeTrialRating ?? 0; set => TimeTrialRating = value; }
+
+    [JsonIgnore, Obsolete("Use \"MinimumParticipationRequirementNumberOfRaces\" instead.")]
+    public int MprNumberOfRaces { get => MinimumParticipationRequirementNumberOfRaces; set => MinimumParticipationRequirementNumberOfRaces = value; }
+
+    [JsonIgnore, Obsolete("Use \"MinimumParticipationRequirementNumberOfTimeTrials\" instead.")]
+    public int MprNumberOfTimeTrials { get => MinimumParticipationRequirementNumberOfTimeTrials; set => MinimumParticipationRequirementNumberOfTimeTrials = value; }
 }

@@ -1,4 +1,4 @@
-﻿// © 2023 Adrian Clark
+﻿// © Adrian Clark - Aydsko.iRacingData
 // This file is licensed to you under the MIT license.
 
 namespace Aydsko.iRacingData.Common;
@@ -11,11 +11,22 @@ public class License
     [JsonPropertyName("category")]
     public string Category { get; set; } = default!;
 
+    [JsonPropertyName("category_name")]
+    public string CategoryName { get; set; } = default!;
+
     [JsonPropertyName("license_level")]
     public int LicenseLevel { get; set; }
 
     [JsonPropertyName("safety_rating")]
-    public float SafetyRating { get; set; }
+    public decimal SafetyRating { get; set; }
+
+    /// <summary>Current iRating for this license.</summary>
+    /// <remarks>Will be <see langword="null"/> for &quot;Rookie&quot; licenses.</remarks>
+    [JsonPropertyName("irating")]
+    public int? iRating { get; set; }
+
+    [JsonPropertyName("tt_rating")]
+    public int? TimeTrialRating { get; set; }
 
     [JsonPropertyName("color")]
     public string Color { get; set; } = default!;

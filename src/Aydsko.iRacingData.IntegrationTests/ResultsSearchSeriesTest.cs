@@ -1,9 +1,10 @@
 ﻿// © 2023 Adrian Clark
 // This file is licensed to you under the MIT license.
 
-namespace Aydsko.iRacingData.IntegrationTests.Results;
+namespace Aydsko.iRacingData.IntegrationTests;
 
-internal sealed class ResultsSearchSeriesTest : DataClientIntegrationFixture
+internal sealed class ResultsSearchSeriesTest
+    : DataClientIntegrationFixture
 {
     [Test]
     public async Task GivenValidSearchParametersTheCorrectResultIsReturnedAsync()
@@ -19,13 +20,13 @@ internal sealed class ResultsSearchSeriesTest : DataClientIntegrationFixture
 
         var searchResults = await Client.SearchOfficialResultsAsync(searchParameters).ConfigureAwait(false);
 
-        Assert.Multiple(() =>
+        using (Assert.EnterMultipleScope())
         {
             Assert.That(searchResults, Is.Not.Null);
             Assert.That(searchResults.Data.Header, Is.Not.Null);
             Assert.That(searchResults.Data.Items, Is.Not.Null.Or.Empty);
             Assert.That(searchResults.Data.Items, Has.Length.EqualTo(10));
-        });
+        }
     }
 
     [Test]
@@ -43,7 +44,7 @@ internal sealed class ResultsSearchSeriesTest : DataClientIntegrationFixture
 
         var searchResults = await Client.SearchOfficialResultsAsync(searchParameters).ConfigureAwait(false);
 
-        Assert.Multiple(() =>
+        using (Assert.EnterMultipleScope())
         {
             Assert.That(searchResults, Is.Not.Null);
             Assert.That(searchResults.Data.Header, Is.Not.Null);
@@ -51,6 +52,6 @@ internal sealed class ResultsSearchSeriesTest : DataClientIntegrationFixture
 
             Assert.That(searchResults.Data.Items, Is.Not.Null);
             Assert.That(searchResults.Data.Items, Has.Length.EqualTo(0));
-        });
+        }
     }
 }

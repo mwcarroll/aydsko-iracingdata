@@ -5,6 +5,10 @@ on:
     types: [published]
   workflow_dispatch:
 
+permissions:
+  id-token: write
+  contents: read
+
 jobs:
   build:
     name: 'Publish Package'
@@ -40,11 +44,21 @@ jobs:
         name: 'Documentation Site'
         path: '_site'
 
+    - name: 'NuGet Login'
+      uses: NuGet/login@v1
+      id: nugetlogin
+      with:
+        user: AdrianJSClark
+
     - name: 'Upload to NuGet'
       shell: pwsh
-      run: dotnet nuget push *.nupkg --source https://api.nuget.org/v3/index.json --skip-duplicate --api-key ${{ secrets.NUGET_API_KEY }}
+      run: dotnet nuget push *.nupkg --source https://api.nuget.org/v3/index.json --skip-duplicate --api-key "${{ steps.nugetlogin.outputs.NUGET_API_KEY }}"
 
   deploy:
     name: Deploy Documentation
     needs: build
     uses: ./.github/workflows/_deploy-docs.yml
+    permissions:
+        contents: read
+        pages: write
+        id-token: write

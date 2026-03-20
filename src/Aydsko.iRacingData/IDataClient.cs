@@ -20,31 +20,6 @@ namespace Aydsko.iRacingData;
 /// <summary>Main client to access the iRacing "/data" API endpoints.</summary>
 public interface IDataClient
 {
-    /// <summary>Is the <see cref="IDataClient"/> logged in?</summary>
-    bool IsLoggedIn { get; }
-
-    /// <summary>Supply the username and password if they weren't supplied through the <see cref="iRacingDataClientOptions"/> object.</summary>
-    /// <param name="username">iRacing user name to use for authentication.</param>
-    /// <param name="password">Password associated with the iRacing user name used to authenticate.</param>
-    /// <exception cref="iRacingClientOptionsValueMissingException">Either <paramref name="username"/> or <paramref name="password"/> were <see langword="null"/> or white space.</exception>
-    void UseUsernameAndPassword(string username, string password);
-
-    /// <summary>Supply the username and password if they weren't supplied through the <see cref="iRacingDataClientOptions"/> object.</summary>
-    /// <param name="username">iRacing user name to use for authentication.</param>
-    /// <param name="password">Password associated with the iRacing user name used to authenticate.</param>
-    /// <param name="passwordIsEncoded">If <see langword="true" /> indicates the <paramref name="password"/> value is already encoded ready for submission to the iRacing API.</param>
-    /// <exception cref="iRacingClientOptionsValueMissingException">Either <paramref name="username"/> or <paramref name="password"/> were <see langword="null"/> or white space.</exception>
-    void UseUsernameAndPassword(string username, string password, bool passwordIsEncoded);
-
-    /// <summary>External call to login method, using the <see cref="iRacingDataClientOptions"/> object.</summary>
-    /// <param name="cancellationToken">A token to allow the operation to be cancelled.</param>
-    /// <returns></returns>
-    /// <exception cref="iRacingClientOptionsValueMissingException">Either username or password in the <see cref="iRacingDataClientOptions"/> were <see langword="null"/> or white space.</exception>
-    /// <exception cref="iRacingInMaintenancePeriodException">iRacing is in maintenance period.</exception>
-    /// <exception cref="iRacingLoginFailedException">LIf there's a login failure with the username and password in <see cref="iRacingDataClientOptions"/>.</exception>
-    /// /// <exception cref="iRacingDataClientException">If there's a problem processing the result.</exception>
-    Task LoginExternalAsync(CancellationToken cancellationToken = default);
-
     /// <summary>Retrieves details about the car assets, including image paths and descriptions.</summary>
     /// <param name="cancellationToken">A token to allow the operation to be cancelled.</param>
     /// <returns>A <see cref="DataResponse{TData}"/> containing a dictionary which maps the car identifier to a <see cref="CarAssetDetail"/> object for each car.</returns>
@@ -256,6 +231,14 @@ public interface IDataClient
     /// <exception cref="iRacingUnauthorizedResponseException">If the iRacing API returns a <c>401 Unauthorized</c> response.</exception>
     Task<DataResponse<LicenseLookup[]>> GetLicenseLookupsAsync(CancellationToken cancellationToken = default);
 
+    /// <summary>Returns two lookups giving information about the currently-running season. One lookup with the tag &quot;Quarter&quot; and one tagged &quot;Year&quot;.</summary>
+    /// <param name="cancellationToken">A token to allow the operation to be cancelled.</param>
+    /// <returns>A <see cref="DataResponse{TData}"/> containing an array of <see cref="LookupGroup"/> objects.</returns>
+    /// <exception cref="InvalidOperationException">If the client is not currently authenticated.</exception>
+    /// <exception cref="iRacingDataClientException">If there's a problem processing the result.</exception>
+    /// <exception cref="iRacingUnauthorizedResponseException">If the iRacing API returns a <c>401 Unauthorized</c> response.</exception>
+    Task<DataResponse<LookupGroup[]>> GetCurrentSeasonLookupAsync(CancellationToken cancellationToken = default);
+
     /// <summary>Information about reference data defined by the system.</summary>
     /// <param name="cancellationToken">A token to allow the operation to be cancelled.</param>
     /// <returns>A <see cref="DataResponse{TData}"/> containing an array of <see cref="LookupGroup"/> objects.</returns>
@@ -435,6 +418,46 @@ public interface IDataClient
     /// <exception cref="iRacingDataClientException">If there's a problem processing the result.</exception>
     /// <exception cref="iRacingUnauthorizedResponseException">If the iRacing API returns a <c>401 Unauthorized</c> response.</exception>
     Task<DataResponse<SeasonSeries[]>> GetSeasonsAsync(bool includeSeries, CancellationToken cancellationToken = default);
+
+    /// <summary>Retrieve information about the season and series.</summary>
+    /// <param name="seasonYear">The year to list seasons for.</param>
+    /// <param name="seasonQuarter">The quarter to list seasons for.</param>
+    /// <param name="includeSeries">Indicate if the series details should be included.</param>
+    /// <param name="cancellationToken">A token to allow the operation to be cancelled.</param>
+    /// <returns>A <see cref="DataResponse{TData}"/> containing the season and optionally series detail in a <see cref="SeasonSeries"/> array.</returns>
+    /// <exception cref="InvalidOperationException">If the client is not currently authenticated.</exception>
+    /// <exception cref="iRacingDataClientException">If there's a problem processing the result.</exception>
+    /// <exception cref="iRacingUnauthorizedResponseException">If the iRacing API returns a <c>401 Unauthorized</c> response.</exception>
+    Task<DataResponse<SeasonSeries[]>> GetSeasonsAsync(int seasonYear, int seasonQuarter, bool includeSeries, CancellationToken cancellationToken = default);
+
+    /// <summary>A list of current seasons.</summary>
+    /// <param name="includeSeries">Indicate if the series details should be included.</param>
+    /// <param name="cancellationToken">A token to allow the operation to be cancelled.</param>
+    /// <returns>A <see cref="DataResponse{TData}"/> containing the season and optionally series details in an array of <see cref="SeasonDetail"/> objects.</returns>
+    /// <exception cref="InvalidOperationException">If the client is not currently authenticated.</exception>
+    /// <exception cref="iRacingDataClientException">If there's a problem processing the result.</exception>
+    /// <exception cref="iRacingUnauthorizedResponseException">If the iRacing API returns a <c>401 Unauthorized</c> response.</exception>
+    Task<DataResponse<SeasonDetail[]>> GetSeasonListAsync(bool includeSeries, CancellationToken cancellationToken = default);
+
+    /// <summary>A list of seasons for the given year and quarter.</summary>
+    /// <param name="seasonYear">The year to list seasons for.</param>
+    /// <param name="seasonQuarter">The quarter to list seasons for.</param>
+    /// <param name="includeSeries">Indicate if the series details should be included.</param>
+    /// <param name="cancellationToken">A token to allow the operation to be cancelled.</param>
+    /// <returns>A <see cref="DataResponse{TData}"/> containing the season and optionally series details in an array of <see cref="SeasonDetail"/> objects.</returns>
+    /// <exception cref="InvalidOperationException">If the client is not currently authenticated.</exception>
+    /// <exception cref="iRacingDataClientException">If there's a problem processing the result.</exception>
+    /// <exception cref="iRacingUnauthorizedResponseException">If the iRacing API returns a <c>401 Unauthorized</c> response.</exception>
+    Task<DataResponse<SeasonDetail[]>> GetSeasonListAsync(int seasonYear, int seasonQuarter, bool includeSeries, CancellationToken cancellationToken = default);
+
+    /// <summary>A list of current season schedules.</summary>
+    /// <param name="seasonId">Unique identifier for the season.</param>
+    /// <param name="cancellationToken">A token to allow the operation to be cancelled.</param>
+    /// <returns>A <see cref="DataResponse{TData}"/> containing the season's schedule <see cref="SeasonSchedule"/> object.</returns>
+    /// <exception cref="InvalidOperationException">If the client is not currently authenticated.</exception>
+    /// <exception cref="iRacingDataClientException">If there's a problem processing the result.</exception>
+    /// <exception cref="iRacingUnauthorizedResponseException">If the iRacing API returns a <c>401 Unauthorized</c> response.</exception>
+    Task<DataResponse<SeasonSchedule>> GetSeasonScheduleAsync(int seasonId, CancellationToken cancellationToken = default);
 
     /// <summary>Retrieve a list of series.</summary>
     /// <param name="cancellationToken">A token to allow the operation to be cancelled.</param>
@@ -749,4 +772,11 @@ public interface IDataClient
     /// <param name="cancellationToken">A token to allow the operation to be cancelled.</param>
     /// <returns>A <see cref="DataResponse{TData}"/> containing the season's super session results as a <see cref="SeasonSuperSessionResultsHeader"/> object.</returns>
     Task<DataResponse<(SeasonSuperSessionResultsHeader Header, SeasonSuperSessionResultItem[] Results)>> GetSeasonSuperSessionStandingsAsync(int seasonId, int carClassId, int? division = null, int? raceWeekIndex = null, CancellationToken cancellationToken = default);
+
+    /// <summary>Retrieve the list of drivers involved in the currently-running subsession.</summary>
+    /// <param name="subSessionId">The identifier of the running subsession for which a list of drivers should be returned.</param>
+    /// <param name="cancellationToken">A token to allow the operation to be cancelled.</param>
+    /// <returns>A <see cref="DataResponse{TData}"/> containing the list of drivers as a <see cref="RegisteredDriversList"/> object.</returns>
+    /// <remarks>If the subsession has finished the <see cref="RegisteredDriversList.Entries"/> array will be empty.</remarks>
+    Task<DataResponse<RegisteredDriversList>> GetRegisteredDriversListAsync(int subSessionId, CancellationToken cancellationToken = default);
 }
